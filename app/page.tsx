@@ -63,7 +63,7 @@ function Dashboard({ stats, lists, selectedListId }: { stats: any; lists: ListIt
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <h2>Stats</h2>
           <form method="post" action="/api/clear-log">
-            <button type="submit" style={{ background: '#300', color: '#f66', padding: '6px 12px' }}>
+            <button type="submit" style={{ background: '#300', color: '#f66', padding: '6px 12px', borderRadius: 4 }}>
               Clear Log
             </button>
           </form>
