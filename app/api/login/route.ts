@@ -9,16 +9,17 @@ export async function POST(req: NextRequest) {
     login !== process.env.ADMIN_LOGIN ||
     password !== process.env.ADMIN_PASSWORD
   ) {
-    return NextResponse.redirect(new URL('/', req.url));
+    return NextResponse.redirect(new URL('/?error=invalid_credentials', req.url), { status: 303 });
   }
 
-  const res = NextResponse.redirect(new URL('/', req.url));
+  const res = NextResponse.redirect(new URL('/', req.url), { status: 303 });
 
   res.cookies.set('ca_auth', '1', {
     httpOnly: true,
-    secure: true,
+    secure: process.env.NODE_ENV === 'production',
     sameSite: 'lax',
     path: '/',
+    maxAge: 60 * 60 * 24 * 7,
   });
 
   return res;
