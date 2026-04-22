@@ -18,7 +18,7 @@ export async function POST(req: NextRequest) {
   const isAuthorized = cookieAuth || token === process.env.ADMIN_TOKEN;
 
   if (!isAuthorized) {
-    return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
+    return NextResponse.redirect(new URL('/?error=unauthorized', req.url), { status: 303 });
   }
 
   try {
@@ -30,7 +30,7 @@ export async function POST(req: NextRequest) {
       : [];
 
     if (!listIds.length) {
-      return NextResponse.json({ error: 'no lists configured' }, { status: 400 });
+      return NextResponse.redirect(new URL('/?error=no_list_configured', req.url), { status: 303 });
     }
 
     const result = await syncLists(listIds);
@@ -42,15 +42,9 @@ export async function POST(req: NextRequest) {
       date: new Date().toISOString()
     });
 
-    const url = new URL(req.url);
-
-    if (url.searchParams.get('redirect') === '1') {
-      return NextResponse.redirect(new URL('/', req.url));
-    }
-
-    return NextResponse.json({ ok: true, result });
+    return NextResponse.redirect(new URL('/', req.url), { status: 303 });
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'unknown_error';
+    const message = error instanceof Error ? error.message : 'sync_failed';
 
     await appendRun({
       type: 'manual',
@@ -59,6 +53,6 @@ export async function POST(req: NextRequest) {
       date: new Date().toISOString()
     });
 
-    return NextResponse.json({ error: message }, { status: 500 });
+    return NextResponse.redirect(new URL(`/?error=${encodeURIComponent(message)}`, req.url), { status: 303 });
   }
 }
