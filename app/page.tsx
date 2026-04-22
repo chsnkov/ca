@@ -3,10 +3,17 @@ import { cookies } from 'next/headers';
 
 export const dynamic = 'force-dynamic';
 
-function LoginForm() {
+function LoginForm({ error }: { error?: string }) {
   return (
     <main style={{ padding: 40, fontFamily: 'sans-serif', maxWidth: 420, margin: '40px auto' }}>
       <h1>Login</h1>
+
+      {error && (
+        <div style={{ background: '#300', color: '#f66', padding: 10 }}>
+          Invalid credentials
+        </div>
+      )}
+
       <form method="post" action="/api/login" style={{ display: 'grid', gap: 12 }}>
         <input name="login" placeholder="Login" style={{ padding: 10 }} />
         <input name="password" type="password" placeholder="Password" style={{ padding: 10 }} />
@@ -37,12 +44,12 @@ function Dashboard({ stats }: { stats: any }) {
   );
 }
 
-export default async function Page() {
+export default async function Page({ searchParams }: { searchParams?: { error?: string } }) {
   const cookieStore = await cookies();
   const isAuthed = cookieStore.get('ca_auth')?.value === '1';
 
   if (!isAuthed) {
-    return <LoginForm />;
+    return <LoginForm error={searchParams?.error} />;
   }
 
   const stats = await getStats();
