@@ -1,5 +1,7 @@
 import { getStats } from '../lib/store';
 
+export const dynamic = 'force-dynamic';
+
 export default async function Page() {
   const stats = await getStats();
 
