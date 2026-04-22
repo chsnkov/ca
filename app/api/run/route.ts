@@ -1,20 +1,50 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getStats, saveStats } from '../../../lib/store';
+import { appendRun, getConfig } from '../../../lib/store';
+import { syncLists } from '../../../lib/clickup';
 
 export async function POST(req: NextRequest) {
-  const body = await req.formData();
-  const token = body.get('token');
+  let token: string | null = null;
+
+  try {
+    const json = await req.json();
+    token = json?.token || null;
+  } catch {
+    const form = await req.formData();
+    token = String(form.get('token') || '');
+  }
 
   if (token !== process.env.ADMIN_TOKEN) {
     return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
   }
 
-  const stats = await getStats();
-  stats.runs = stats.runs || [];
+  try {
+    const config = await getConfig();
+    const listIds = config?.selectedListIds || [];
 
-  stats.runs.push({ type: 'manual', date: new Date().toISOString() });
+    if (!listIds.length) {
+      return NextResponse.json({ error: 'no lists configured' }, { status: 400 });
+    }
 
-  await saveStats(stats);
+    const result = await syncLists(listIds);
 
-  return NextResponse.json({ ok: true });
+    await appendRun({
+      type: 'manual',
+      ok: true,
+      result,
+      date: new Date().toISOString()
+    });
+
+    return NextResponse.json({ ok: true, result });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'unknown_error';
+
+    await appendRun({
+      type: 'manual',
+      ok: false,
+      error: message,
+      date: new Date().toISOString()
+    });
+
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
 }
