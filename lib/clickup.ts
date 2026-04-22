@@ -1,4 +1,4 @@
-""import { createHmac } from 'crypto';
+import { createHmac } from 'crypto';
 const API='https://api.clickup.com/api/v2';
 
 const token=()=>{if(!process.env.CLICKUP_TOKEN)throw new Error('no token');return process.env.CLICKUP_TOKEN};
@@ -11,7 +11,6 @@ export async function syncParentTask(id:string){
  const t=await getTask(id);const list=t.list?.id;if(!list)return{updated:0,skipped:0,ignored:0,errors:0};
  const data=await req(`/list/${list}/task?subtasks=true`);const tasks=data.tasks||[];
  const fields=(await req(`/list/${list}/field`)).fields||[];
- const map=new Map(tasks.map((x:any)=>[x.id,x]));
  let u=0,s=0,i=0,e=0;
  for(const sub of tasks){
   if(sub.parent!=id)continue;
@@ -45,4 +44,3 @@ export async function getLists(){
  }
  return out;
 }
-""
