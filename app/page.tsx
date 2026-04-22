@@ -59,10 +59,20 @@ function Dashboard({ stats, lists, selectedListId }: { stats: any; lists: ListIt
         </form>
       </section>
 
-      <h2>Stats</h2>
-      <pre style={{ background: '#111', color: '#0f0', padding: 16, overflowX: 'auto' }}>
-        {JSON.stringify(stats, null, 2)}
-      </pre>
+      <section style={{ margin: '20px 0', padding: 16, border: '1px solid #333', borderRadius: 8 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <h2>Stats</h2>
+          <form method="post" action="/api/clear-log">
+            <button type="submit" style={{ background: '#300', color: '#f66', padding: '6px 12px' }}>
+              Clear Log
+            </button>
+          </form>
+        </div>
+
+        <pre style={{ background: '#111', color: '#0f0', padding: 16, overflowX: 'auto' }}>
+          {JSON.stringify(stats, null, 2)}
+        </pre>
+      </section>
     </main>
   );
 }
