@@ -27,8 +27,19 @@ export async function syncLists(ids:string[]){
  for(const id of ids){
   const data=await req(`/list/${id}/task?subtasks=true`);
   const tasks=data.tasks||[];
-  const parents=new Set(tasks.filter((t:any)=>t.parent&&!tasks.find((x:any)=>x.id==t.parent&&x.parent)).map((t:any)=>t.parent));
-  for(const p of parents){const r=await syncParentTask(p);u+=r.updated;s+=r.skipped;e+=r.errors}
+
+  const parentIds:string[]=tasks
+    .filter((t:any)=>t.parent&&!tasks.find((x:any)=>x.id==t.parent&&x.parent))
+    .map((t:any)=>String(t.parent));
+
+  const parents=new Set<string>(parentIds);
+
+  for(const p of parents){
+    const r=await syncParentTask(p);
+    u+=r.updated;
+    s+=r.skipped;
+    e+=r.errors;
+  }
  }
  return{updated:u,skipped:s,ignored:i,errors:e};
 }
