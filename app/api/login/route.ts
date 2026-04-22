@@ -2,10 +2,14 @@ import { NextRequest, NextResponse } from 'next/server';
 
 export async function POST(req: NextRequest) {
   const form = await req.formData();
-  const token = String(form.get('token') || '');
+  const login = String(form.get('login') || '');
+  const password = String(form.get('password') || '');
 
-  if (token !== process.env.ADMIN_TOKEN) {
-    return NextResponse.redirect(new URL('/login', req.url));
+  if (
+    login !== process.env.ADMIN_LOGIN ||
+    password !== process.env.ADMIN_PASSWORD
+  ) {
+    return NextResponse.redirect(new URL('/', req.url));
   }
 
   const res = NextResponse.redirect(new URL('/', req.url));
