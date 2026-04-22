@@ -13,7 +13,12 @@ export async function getStats() {
 
 export async function saveStats(stats: any) {
   if (!process.env.BLOB_READ_WRITE_TOKEN) return;
-  await put(STATS_PATH, JSON.stringify(stats), { access: 'public', addRandomSuffix: false, token: process.env.BLOB_READ_WRITE_TOKEN });
+  await put(STATS_PATH, JSON.stringify(stats), {
+    access: 'public',
+    addRandomSuffix: false,
+    allowOverwrite: true,
+    token: process.env.BLOB_READ_WRITE_TOKEN,
+  });
 }
 
 export async function getConfig() {
@@ -26,7 +31,12 @@ export async function getConfig() {
 
 export async function saveConfig(config: any) {
   if (!process.env.BLOB_READ_WRITE_TOKEN) return;
-  await put(CONFIG_PATH, JSON.stringify(config), { access: 'public', addRandomSuffix: false, token: process.env.BLOB_READ_WRITE_TOKEN });
+  await put(CONFIG_PATH, JSON.stringify(config), {
+    access: 'public',
+    addRandomSuffix: false,
+    allowOverwrite: true,
+    token: process.env.BLOB_READ_WRITE_TOKEN,
+  });
 }
 
 export async function appendRun(run: any) {
