@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getStats, saveStats } from '@/lib/store';
+import { getStats, saveStats } from '../../../../lib/store';
 
 export async function POST(req: NextRequest) {
   const payload = await req.json();
