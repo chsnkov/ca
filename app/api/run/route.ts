@@ -3,6 +3,8 @@ import { appendRun, getConfig } from '../../../lib/store';
 import { syncLists } from '../../../lib/clickup';
 
 export async function POST(req: NextRequest) {
+  const cookieAuth = req.cookies.get('ca_auth')?.value === '1';
+
   let token: string | null = null;
 
   try {
@@ -13,13 +15,19 @@ export async function POST(req: NextRequest) {
     token = String(form.get('token') || '');
   }
 
-  if (token !== process.env.ADMIN_TOKEN) {
+  const isAuthorized = cookieAuth || token === process.env.ADMIN_TOKEN;
+
+  if (!isAuthorized) {
     return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
   }
 
   try {
     const config = await getConfig();
-    const listIds = config?.selectedListIds || [];
+    const listIds = config?.selectedListIds?.length
+      ? config.selectedListIds
+      : process.env.CLICKUP_LIST_ID
+      ? [process.env.CLICKUP_LIST_ID]
+      : [];
 
     if (!listIds.length) {
       return NextResponse.json({ error: 'no lists configured' }, { status: 400 });
@@ -33,6 +41,12 @@ export async function POST(req: NextRequest) {
       result,
       date: new Date().toISOString()
     });
+
+    const url = new URL(req.url);
+
+    if (url.searchParams.get('redirect') === '1') {
+      return NextResponse.redirect(new URL('/', req.url));
+    }
 
     return NextResponse.json({ ok: true, result });
   } catch (error) {
