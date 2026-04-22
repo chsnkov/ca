@@ -44,9 +44,10 @@ function Dashboard({ stats }: { stats: any }) {
   );
 }
 
-export default async function Page({ searchParams }: { searchParams?: { error?: string } }) {
+export default async function Page(props: { searchParams?: Promise<{ error?: string }> }) {
   const cookieStore = await cookies();
   const isAuthed = cookieStore.get('ca_auth')?.value === '1';
+  const searchParams = await props.searchParams;
 
   if (!isAuthed) {
     return <LoginForm error={searchParams?.error} />;
