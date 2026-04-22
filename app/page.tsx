@@ -1,7 +1,10 @@
-import { getStats } from '../lib/store';
+import { getConfig, getStats } from '../lib/store';
+import { getLists } from '../lib/clickup';
 import { cookies } from 'next/headers';
 
 export const dynamic = 'force-dynamic';
+
+type ListItem = { id: string; name: string };
 
 function LoginForm({ error }: { error?: string }) {
   return (
@@ -23,7 +26,7 @@ function LoginForm({ error }: { error?: string }) {
   );
 }
 
-function Dashboard({ stats }: { stats: any }) {
+function Dashboard({ stats, lists, selectedListId }: { stats: any; lists: ListItem[]; selectedListId?: string }) {
   return (
     <main style={{ padding: 20, fontFamily: 'sans-serif', maxWidth: 900, margin: '0 auto' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -33,11 +36,31 @@ function Dashboard({ stats }: { stats: any }) {
         </form>
       </div>
 
-      <form method="post" action="/api/run?redirect=1" style={{ margin: '20px 0' }}>
-        <button type="submit">Manual Run</button>
-      </form>
+      <section style={{ margin: '20px 0', padding: 16, border: '1px solid #333', borderRadius: 8 }}>
+        <h2>Select List</h2>
+        <form method="post" action="/api/config" style={{ display: 'grid', gap: 12 }}>
+          <select name="selectedListId" defaultValue={selectedListId || ''} style={{ padding: 10 }}>
+            <option value="">Select a ClickUp list</option>
+            {lists.map((list) => (
+              <option key={list.id} value={list.id}>
+                {list.name} ({list.id})
+              </option>
+            ))}
+          </select>
+          <button type="submit">Save Selected List</button>
+        </form>
+      </section>
 
-      <pre style={{ background: '#111', color: '#0f0', padding: 16 }}>
+      <section style={{ margin: '20px 0', padding: 16, border: '1px solid #333', borderRadius: 8 }}>
+        <h2>Manual Run</h2>
+        <p>Runs a full sync for the selected list.</p>
+        <form method="post" action="/api/run?redirect=1">
+          <button type="submit">Run Full Sync</button>
+        </form>
+      </section>
+
+      <h2>Stats</h2>
+      <pre style={{ background: '#111', color: '#0f0', padding: 16, overflowX: 'auto' }}>
         {JSON.stringify(stats, null, 2)}
       </pre>
     </main>
@@ -53,6 +76,13 @@ export default async function Page(props: { searchParams?: Promise<{ error?: str
     return <LoginForm error={searchParams?.error} />;
   }
 
-  const stats = await getStats();
-  return <Dashboard stats={stats} />;
+  const [stats, config, lists] = await Promise.all([
+    getStats(),
+    getConfig(),
+    getLists(),
+  ]);
+
+  const selectedListId = config?.selectedListIds?.[0] || process.env.CLICKUP_LIST_ID || '';
+
+  return <Dashboard stats={stats} lists={lists} selectedListId={selectedListId} />;
 }
