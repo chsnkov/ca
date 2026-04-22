@@ -18,6 +18,7 @@ export type ClickUpTask = {
 };
 
 const CLICKUP_API_BASE = 'https://api.clickup.com/api/v2';
+const CLICKUP_PAGE_SIZE = 100;
 
 function getRequiredEnv(name: string): string {
   const value = process.env[name];
@@ -82,13 +83,17 @@ function isFirstLevelSubtask(task: ClickUpTask, parentTaskId: string): boolean {
   return task.parent === parentTaskId;
 }
 
+function sortTasksByName(tasks: ClickUpTask[]): ClickUpTask[] {
+  return tasks.sort((a, b) => a.name.localeCompare(b.name, 'en', { numeric: true }));
+}
+
 export async function getRootTasksFromList(listId: string): Promise<ClickUpTask[]> {
-  const rootTasks: ClickUpTask[] = [];
+  const rootTaskMap = new Map<string, ClickUpTask>();
   let page = 0;
 
   while (true) {
     const result = await clickupFetch<{ tasks?: ClickUpTask[] }>(
-      `/list/${listId}/task?archived=false&include_closed=true&subtasks=false&page=${page}`
+      `/list/${listId}/task?archived=false&include_closed=true&include_timl=true&subtasks=false&page=${page}`
     );
 
     const pageTasks = result.tasks ?? [];
@@ -96,16 +101,24 @@ export async function getRootTasksFromList(listId: string): Promise<ClickUpTask[
       break;
     }
 
-    rootTasks.push(...pageTasks.filter((task) => !task.parent));
+    for (const task of pageTasks) {
+      if (task.parent) {
+        continue;
+      }
 
-    if (pageTasks.length < 100) {
+      rootTaskMap.set(task.id, task);
+    }
+
+    console.log(`[ClickUp sync] List ${listId}: fetched page ${page}, received ${pageTasks.length} tasks, accumulated ${rootTaskMap.size} root tasks`);
+
+    if (pageTasks.length < CLICKUP_PAGE_SIZE) {
       break;
     }
 
     page += 1;
   }
 
-  return rootTasks;
+  return sortTasksByName(Array.from(rootTaskMap.values()));
 }
 
 export async function getTaskWithSubtasks(taskId: string): Promise<ClickUpTask> {
