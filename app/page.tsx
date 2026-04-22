@@ -1,4 +1,4 @@
-import { getStats } from '@/lib/store';
+import { getStats } from '../lib/store';
 
 export default async function Page() {
   const stats = await getStats();
