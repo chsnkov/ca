@@ -17,6 +17,26 @@ export type ClickUpTask = {
   subtasks?: ClickUpTask[];
 };
 
+export type ClickUpDiscoveryPage = {
+  page: number;
+  apiItems: number;
+  rootItemsOnPage: number;
+  accumulatedRootItems: number;
+  sampleTaskNames: string[];
+};
+
+export type ClickUpListDiscovery = {
+  listId: string;
+  pagesFetched: number;
+  totalApiItems: number;
+  totalRootTasks: number;
+  pages: ClickUpDiscoveryPage[];
+  rootTasks: Array<{
+    id: string;
+    name: string;
+  }>;
+};
+
 const CLICKUP_API_BASE = 'https://api.clickup.com/api/v2';
 const CLICKUP_PAGE_SIZE = 100;
 
@@ -87,16 +107,20 @@ function sortTasksByName(tasks: ClickUpTask[]): ClickUpTask[] {
   return tasks.sort((a, b) => a.name.localeCompare(b.name, 'en', { numeric: true }));
 }
 
+async function fetchListPage(listId: string, page: number): Promise<ClickUpTask[]> {
+  const result = await clickupFetch<{ tasks?: ClickUpTask[] }>(
+    `/list/${listId}/task?archived=false&include_closed=true&include_timl=true&subtasks=false&page=${page}`
+  );
+
+  return result.tasks ?? [];
+}
+
 export async function getRootTasksFromList(listId: string): Promise<ClickUpTask[]> {
   const rootTaskMap = new Map<string, ClickUpTask>();
   let page = 0;
 
   while (true) {
-    const result = await clickupFetch<{ tasks?: ClickUpTask[] }>(
-      `/list/${listId}/task?archived=false&include_closed=true&include_timl=true&subtasks=false&page=${page}`
-    );
-
-    const pageTasks = result.tasks ?? [];
+    const pageTasks = await fetchListPage(listId, page);
     if (pageTasks.length === 0) {
       break;
     }
@@ -119,6 +143,61 @@ export async function getRootTasksFromList(listId: string): Promise<ClickUpTask[
   }
 
   return sortTasksByName(Array.from(rootTaskMap.values()));
+}
+
+export async function discoverListTasks(listId: string): Promise<ClickUpListDiscovery> {
+  const rootTaskMap = new Map<string, ClickUpTask>();
+  const pages: ClickUpDiscoveryPage[] = [];
+  let totalApiItems = 0;
+  let page = 0;
+
+  while (true) {
+    const pageTasks = await fetchListPage(listId, page);
+    if (pageTasks.length === 0) {
+      break;
+    }
+
+    const rootTasksOnPage = pageTasks.filter((task) => !task.parent);
+    totalApiItems += pageTasks.length;
+
+    for (const task of rootTasksOnPage) {
+      rootTaskMap.set(task.id, task);
+    }
+
+    pages.push({
+      page,
+      apiItems: pageTasks.length,
+      rootItemsOnPage: rootTasksOnPage.length,
+      accumulatedRootItems: rootTaskMap.size,
+      sampleTaskNames: rootTasksOnPage.slice(0, 10).map((task) => task.name),
+    });
+
+    if (pageTasks.length < CLICKUP_PAGE_SIZE) {
+      break;
+    }
+
+    page += 1;
+  }
+
+  const rootTasks = sortTasksByName(Array.from(rootTaskMap.values())).map((task) => ({
+    id: task.id,
+    name: task.name,
+  }));
+
+  return {
+    listId,
+    pagesFetched: pages.length,
+    totalApiItems,
+    totalRootTasks: rootTasks.length,
+    pages,
+    rootTasks,
+  };
+}
+
+export async function discoverAllLists(): Promise<{ discovery: ClickUpListDiscovery[] }> {
+  const listIds = getListIds();
+  const discovery = await Promise.all(listIds.map((listId) => discoverListTasks(listId)));
+  return { discovery };
 }
 
 export async function getTaskWithSubtasks(taskId: string): Promise<ClickUpTask> {
