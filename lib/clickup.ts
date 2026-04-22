@@ -46,6 +46,8 @@ export async function syncLists(ids:string[]){
     hasParent:!!t.parent
   }));
 
+  const rootTasks = rawTasks.filter((t:any)=>!t.hasParent);
+
   const parentIds:string[]=tasks
     .filter((t:any)=>t.parent&&!tasks.find((x:any)=>x.id==t.parent&&x.parent))
     .map((t:any)=>String(t.parent));
@@ -55,6 +57,7 @@ export async function syncLists(ids:string[]){
   discovery.push({
     listId:String(id),
     totalTasks:tasks.length,
+    rootTasks:rootTasks.map((t:any)=>({id:t.id,name:t.name})),
     detectedParents:[...parents],
     rawTasks:rawTasks.slice(0,200)
   });
