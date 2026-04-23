@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { getConfig } from '../../../lib/store';
 
 const API = 'https://api.clickup.com/api/v2';
 
@@ -28,6 +29,15 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ ok: false, error: 'no_team_id' });
     }
 
+    const config = await getConfig();
+    const selectedListIds = config?.selectedListIds || [];
+
+    if (!selectedListIds.length) {
+      return NextResponse.json({ ok: false, error: 'no_selected_list' });
+    }
+
+    const listId = selectedListIds[0];
+
     const endpoint = `${req.nextUrl.origin}/api/clickup-webhook`;
 
     const webhook = await clickupReq(`/team/${teamId}/webhook`, {
@@ -35,11 +45,11 @@ export async function GET(req: NextRequest) {
       body: JSON.stringify({
         endpoint,
         events: ['taskStatusUpdated'],
-        list_id: process.env.CLICKUP_LIST_ID,
+        list_id: listId,
       }),
     });
 
-    return NextResponse.json({ ok: true, webhook });
+    return NextResponse.json({ ok: true, webhook, listId });
   } catch (err: any) {
     return NextResponse.json({ ok: false, error: err.message });
   }
