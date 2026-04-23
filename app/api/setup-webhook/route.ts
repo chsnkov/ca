@@ -36,11 +36,8 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ ok: false, error: 'no_selected_list' });
     }
 
-    const listId = selectedListIds[0];
-
     const endpoint = `${req.nextUrl.origin}/api/clickup-webhook`;
 
-    // 🔥 удалить старые вебхуки для этого endpoint
     const existing = await clickupReq(`/team/${teamId}/webhook`);
     const webhooks = existing?.webhooks || [];
 
@@ -53,21 +50,26 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    // 🔥 создать новый вебхук
-    const webhook = await clickupReq(`/team/${teamId}/webhook`, {
-      method: 'POST',
-      body: JSON.stringify({
-        endpoint,
-        events: ['taskStatusUpdated'],
-        list_id: listId,
-      }),
-    });
+    const created: any[] = [];
+
+    for (const listId of selectedListIds) {
+      const webhook = await clickupReq(`/team/${teamId}/webhook`, {
+        method: 'POST',
+        body: JSON.stringify({
+          endpoint,
+          events: ['taskStatusUpdated'],
+          list_id: listId,
+        }),
+      });
+
+      created.push({ listId, webhookId: webhook.id });
+    }
 
     return NextResponse.json({
       ok: true,
-      listId,
+      selectedListIds,
       deletedWebhooks: deleted,
-      webhook,
+      createdWebhooks: created,
     });
   } catch (err: any) {
     return NextResponse.json({ ok: false, error: err.message });
