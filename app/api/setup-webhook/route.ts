@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 
 const API = 'https://api.clickup.com/api/v2';
 
-async function req(path: string, init?: RequestInit) {
+async function clickupReq(path: string, init?: RequestInit) {
   const res = await fetch(API + path, {
     ...init,
     headers: {
@@ -21,7 +21,7 @@ async function req(path: string, init?: RequestInit) {
 
 export async function GET(req: NextRequest) {
   try {
-    const teams = await req('/team');
+    const teams = await clickupReq('/team');
     const teamId = teams?.teams?.[0]?.id;
 
     if (!teamId) {
@@ -30,7 +30,7 @@ export async function GET(req: NextRequest) {
 
     const endpoint = `${req.nextUrl.origin}/api/clickup-webhook`;
 
-    const webhook = await req(`/team/${teamId}/webhook`, {
+    const webhook = await clickupReq(`/team/${teamId}/webhook`, {
       method: 'POST',
       body: JSON.stringify({
         endpoint,
