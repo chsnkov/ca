@@ -5,7 +5,13 @@ export async function POST(req: NextRequest) {
   try {
     const form = await req.formData();
 
-    const selectedListIds = form.getAll('selectedListIds').map(String);
+    const raw = form.getAll('selectedListIds');
+    let selectedListIds = raw.map(String).filter(Boolean);
+
+    if (!selectedListIds.length) {
+      const single = form.get('selectedListIds');
+      if (single) selectedListIds = [String(single)];
+    }
 
     if (!selectedListIds.length) {
       return NextResponse.redirect(new URL('/?error=no_list_selected', req.url), { status: 303 });
@@ -15,6 +21,9 @@ export async function POST(req: NextRequest) {
       selectedListIds,
       managedWebhooks: [],
     });
+
+    // auto webhook recreate
+    await fetch(req.nextUrl.origin + '/api/setup-webhook').catch(() => {});
 
     return NextResponse.redirect(new URL('/', req.url), { status: 303 });
   } catch (error) {
