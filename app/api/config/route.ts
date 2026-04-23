@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { saveConfig } from '../../../lib/store';
+import { setupWebhooks } from '../setup-webhook/route';
 
 export async function POST(req: NextRequest) {
   try {
@@ -22,8 +23,8 @@ export async function POST(req: NextRequest) {
       managedWebhooks: [],
     });
 
-    // auto webhook recreate
-    await fetch(req.nextUrl.origin + '/api/setup-webhook').catch(() => {});
+    // 🔥 прямой вызов
+    await setupWebhooks(req.nextUrl.origin);
 
     return NextResponse.redirect(new URL('/', req.url), { status: 303 });
   } catch (error) {
