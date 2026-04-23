@@ -40,6 +40,20 @@ export async function GET(req: NextRequest) {
 
     const endpoint = `${req.nextUrl.origin}/api/clickup-webhook`;
 
+    // 🔥 удалить старые вебхуки для этого endpoint
+    const existing = await clickupReq(`/team/${teamId}/webhook`);
+    const webhooks = existing?.webhooks || [];
+
+    const deleted: string[] = [];
+
+    for (const wh of webhooks) {
+      if (wh.endpoint === endpoint) {
+        await clickupReq(`/webhook/${wh.id}`, { method: 'DELETE' });
+        deleted.push(wh.id);
+      }
+    }
+
+    // 🔥 создать новый вебхук
     const webhook = await clickupReq(`/team/${teamId}/webhook`, {
       method: 'POST',
       body: JSON.stringify({
@@ -49,7 +63,12 @@ export async function GET(req: NextRequest) {
       }),
     });
 
-    return NextResponse.json({ ok: true, webhook, listId });
+    return NextResponse.json({
+      ok: true,
+      listId,
+      deletedWebhooks: deleted,
+      webhook,
+    });
   } catch (err: any) {
     return NextResponse.json({ ok: false, error: err.message });
   }
