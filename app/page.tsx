@@ -27,6 +27,8 @@ function LoginForm({ error }: { error?: string }) {
 }
 
 function Dashboard({ stats, lists, selectedListIds }: { stats: any; lists: ListItem[]; selectedListIds: string[] }) {
+  const selectedLists = lists.filter(l => selectedListIds.includes(l.id));
+
   return (
     <main style={{ padding: 20, fontFamily: 'sans-serif', maxWidth: 900, margin: '0 auto' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -35,6 +37,21 @@ function Dashboard({ stats, lists, selectedListIds }: { stats: any; lists: ListI
           <button type="submit">Logout</button>
         </form>
       </div>
+
+      <section style={{ margin: '20px 0', padding: 16, border: '1px solid #0a0', borderRadius: 8 }}>
+        <h2>Active Lists</h2>
+
+        {selectedLists.length === 0 && (
+          <div style={{ color: '#888' }}>No lists selected</div>
+        )}
+
+        {selectedLists.map(list => (
+          <div key={list.id} style={{ padding: '6px 0', borderBottom: '1px solid #222' }}>
+            <strong>{list.name}</strong>
+            <div style={{ fontSize: 12, color: '#888' }}>{list.id}</div>
+          </div>
+        ))}
+      </section>
 
       <section style={{ margin: '20px 0', padding: 16, border: '1px solid #333', borderRadius: 8 }}>
         <h2>Select Lists</h2>
