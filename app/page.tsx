@@ -26,7 +26,7 @@ function LoginForm({ error }: { error?: string }) {
   );
 }
 
-function Dashboard({ stats, lists, selectedListId }: { stats: any; lists: ListItem[]; selectedListId?: string }) {
+function Dashboard({ stats, lists, selectedListIds }: { stats: any; lists: ListItem[]; selectedListIds: string[] }) {
   return (
     <main style={{ padding: 20, fontFamily: 'sans-serif', maxWidth: 900, margin: '0 auto' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -37,23 +37,27 @@ function Dashboard({ stats, lists, selectedListId }: { stats: any; lists: ListIt
       </div>
 
       <section style={{ margin: '20px 0', padding: 16, border: '1px solid #333', borderRadius: 8 }}>
-        <h2>Select List</h2>
+        <h2>Select Lists</h2>
         <form method="post" action="/api/config" style={{ display: 'grid', gap: 12 }}>
-          <select name="selectedListId" defaultValue={selectedListId || ''} style={{ padding: 10 }}>
-            <option value="">Select a ClickUp list</option>
+          <select
+            name="selectedListIds"
+            multiple
+            defaultValue={selectedListIds}
+            style={{ padding: 10, height: 200 }}
+          >
             {lists.map((list) => (
               <option key={list.id} value={list.id}>
                 {list.name} ({list.id})
               </option>
             ))}
           </select>
-          <button type="submit">Save Selected List</button>
+          <button type="submit">Save Selected Lists</button>
         </form>
       </section>
 
       <section style={{ margin: '20px 0', padding: 16, border: '1px solid #333', borderRadius: 8 }}>
         <h2>Manual Run</h2>
-        <p>Runs a full sync for the selected list.</p>
+        <p>Runs a full sync for all selected lists.</p>
         <form method="post" action="/api/run?redirect=1">
           <button type="submit">Run Full Sync</button>
         </form>
@@ -92,7 +96,7 @@ export default async function Page(props: { searchParams?: Promise<{ error?: str
     getLists(),
   ]);
 
-  const selectedListId = config?.selectedListIds?.[0] || process.env.CLICKUP_LIST_ID || '';
+  const selectedListIds = config?.selectedListIds || [];
 
-  return <Dashboard stats={stats} lists={lists} selectedListId={selectedListId} />;
+  return <Dashboard stats={stats} lists={lists} selectedListIds={selectedListIds} />;
 }
