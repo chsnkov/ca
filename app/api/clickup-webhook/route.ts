@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getTask, syncParentTask } from '../../../lib/clickup';
+import { getConfig, appendRun } from '../../../lib/store';
 
 export async function POST(req: NextRequest) {
   try {
@@ -18,7 +19,35 @@ export async function POST(req: NextRequest) {
 
     const task = await getTask(String(taskId));
 
+    // берём конфиг (выбранный список)
+    const config = await getConfig();
+    const selectedListIds = config?.selectedListIds || [];
+
+    const taskListId = String(task?.list?.id || '');
+
+    // фильтр по выбранному списку
+    if (selectedListIds.length && !selectedListIds.includes(taskListId)) {
+      await appendRun({
+        type: 'webhook',
+        action: 'ignored_wrong_list',
+        taskId,
+        taskListId,
+        selectedListIds,
+        timestamp: Date.now(),
+      });
+
+      return NextResponse.json({ ok: true, ignored: 'wrong_list' });
+    }
+
     if (!task.parent) {
+      await appendRun({
+        type: 'webhook',
+        action: 'ignored_not_subtask',
+        taskId,
+        taskListId,
+        timestamp: Date.now(),
+      });
+
       return NextResponse.json({ ok: true, ignored: 'not_subtask' });
     }
 
@@ -26,11 +55,30 @@ export async function POST(req: NextRequest) {
 
     await syncParentTask(parentId);
 
+    // логируем успешное обновление
+    await appendRun({
+      type: 'webhook',
+      action: 'synced',
+      taskId,
+      parentId,
+      taskName: task.name,
+      status: task.status?.status,
+      listId: taskListId,
+      timestamp: Date.now(),
+    });
+
     return NextResponse.json({
       ok: true,
       parentSynced: parentId,
     });
   } catch (err: any) {
+    await appendRun({
+      type: 'webhook',
+      action: 'error',
+      error: err?.message || 'unknown_error',
+      timestamp: Date.now(),
+    });
+
     return NextResponse.json({
       ok: false,
       error: err?.message || 'unknown_error',
