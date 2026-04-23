@@ -19,16 +19,15 @@ export async function POST(req: NextRequest) {
 
     const task = await getTask(String(taskId));
 
-    // берём конфиг (выбранный список)
     const config = await getConfig();
     const selectedListIds = config?.selectedListIds || [];
 
     const taskListId = String(task?.list?.id || '');
 
-    // фильтр по выбранному списку
     if (selectedListIds.length && !selectedListIds.includes(taskListId)) {
       await appendRun({
         type: 'webhook',
+        message: 'WEBHOOK SYNC: ignored (wrong list)',
         action: 'ignored_wrong_list',
         taskId,
         taskListId,
@@ -42,6 +41,7 @@ export async function POST(req: NextRequest) {
     if (!task.parent) {
       await appendRun({
         type: 'webhook',
+        message: 'WEBHOOK SYNC: ignored (not subtask)',
         action: 'ignored_not_subtask',
         taskId,
         taskListId,
@@ -55,9 +55,9 @@ export async function POST(req: NextRequest) {
 
     await syncParentTask(parentId);
 
-    // логируем успешное обновление
     await appendRun({
       type: 'webhook',
+      message: 'WEBHOOK SYNC: success',
       action: 'synced',
       taskId,
       parentId,
@@ -74,6 +74,7 @@ export async function POST(req: NextRequest) {
   } catch (err: any) {
     await appendRun({
       type: 'webhook',
+      message: 'WEBHOOK SYNC: error',
       action: 'error',
       error: err?.message || 'unknown_error',
       timestamp: Date.now(),
