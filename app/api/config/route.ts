@@ -4,14 +4,15 @@ import { saveConfig } from '../../../lib/store';
 export async function POST(req: NextRequest) {
   try {
     const form = await req.formData();
-    const selectedListId = String(form.get('selectedListId') || '');
 
-    if (!selectedListId) {
+    const selectedListIds = form.getAll('selectedListIds').map(String);
+
+    if (!selectedListIds.length) {
       return NextResponse.redirect(new URL('/?error=no_list_selected', req.url), { status: 303 });
     }
 
     await saveConfig({
-      selectedListIds: [selectedListId],
+      selectedListIds,
       managedWebhooks: [],
     });
 
