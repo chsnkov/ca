@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { saveConfig, appendRun } from '../../../lib/store';
-import { setupWebhooks } from '../setup-webhook/route';
 
 export async function POST(req: NextRequest) {
   try {
@@ -18,7 +17,6 @@ export async function POST(req: NextRequest) {
       return NextResponse.redirect(new URL('/?error=no_list_selected', req.url), { status: 303 });
     }
 
-    // 🔥 LOG WHAT UI SENT
     await appendRun({
       type: 'config',
       message: 'UI LIST SELECTION',
@@ -33,7 +31,7 @@ export async function POST(req: NextRequest) {
     });
 
     try {
-      await setupWebhooks(req.nextUrl.origin);
+      await fetch(req.nextUrl.origin + '/api/setup-webhook');
 
       await appendRun({
         type: 'config',
