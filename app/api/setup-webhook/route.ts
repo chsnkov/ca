@@ -20,7 +20,8 @@ async function clickupReq(path: string, init?: RequestInit) {
   return res.json();
 }
 
-export async function setupWebhooks(origin: string) {
+// fixed: no export here
+async function setupWebhooks(origin: string) {
   const teams = await clickupReq('/team');
   const teamId = teams?.teams?.[0]?.id;
 
