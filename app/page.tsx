@@ -2,7 +2,7 @@ import { getConfig, getStats } from '../lib/store';
 import { getLists } from '../lib/clickup';
 import { cookies } from 'next/headers';
 
-// noop: trigger redeploy
+// noop: trigger redeploy v2
 export const dynamic = 'force-dynamic';
 
 type ListItem = { id: string; name: string };
