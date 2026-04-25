@@ -1,4 +1,4 @@
-import { createHmac } from 'crypto';
+import { createHmac, timingSafeEqual } from 'crypto';
 
 const API = 'https://api.clickup.com/api/v2';
 const PAGE_SIZE = 100;
@@ -227,8 +227,16 @@ export async function syncLists(ids: string[]) {
   return { updated: u, skipped: s, ignored: i, errors: e, details, discovery };
 }
 
-export const verifyWebhook = (body: string, secret: string, sig: string) =>
-  createHmac('sha256', secret).update(body).digest('hex') === sig;
+export function verifyWebhook(body: string, secret: string, sig: string) {
+  const expected = createHmac('sha256', secret).update(body).digest('hex');
+  const received = sig.startsWith('sha256=') ? sig.slice('sha256='.length) : sig;
+
+  try {
+    return timingSafeEqual(Buffer.from(expected, 'hex'), Buffer.from(received, 'hex'));
+  } catch {
+    return false;
+  }
+}
 
 export async function getLists() {
   const teams = ((await req('/team')).teams || []) as any[];
@@ -237,13 +245,38 @@ export async function getLists() {
   for (const t of teams) {
     const spaces = ((await req(`/team/${t.id}/space`)).spaces || []) as any[];
     for (const s of spaces) {
+      const spaceLists = ((await req(`/space/${s.id}/list`)).lists || []) as any[];
+      for (const l of spaceLists) {
+        out.push({
+          id: String(l.id),
+          name: l.name,
+          spaceId: String(s.id),
+          spaceName: s.name,
+          folderId: null,
+          folderName: 'No folder',
+        });
+      }
+
       const folders = ((await req(`/space/${s.id}/folder`)).folders || []) as any[];
       for (const f of folders) {
         const lists = ((await req(`/folder/${f.id}/list`)).lists || []) as any[];
-        for (const l of lists) out.push({ id: l.id, name: l.name });
+        for (const l of lists) {
+          out.push({
+            id: String(l.id),
+            name: l.name,
+            spaceId: String(s.id),
+            spaceName: s.name,
+            folderId: String(f.id),
+            folderName: f.name,
+          });
+        }
       }
     }
   }
 
-  return out;
+  return out.sort((a, b) =>
+    [a.spaceName, a.folderName, a.name]
+      .join('\u0000')
+      .localeCompare([b.spaceName, b.folderName, b.name].join('\u0000'), 'en', { numeric: true })
+  );
 }

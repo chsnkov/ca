@@ -71,5 +71,7 @@ export async function saveConfig(config: any) {
 }
 
 export async function appendRun(run: any) {
-  await saveStats({ runs: [run] });
+  const stats = await getStats();
+  const runs = Array.isArray(stats?.runs) ? stats.runs : [];
+  await saveStats({ ...stats, runs: [run, ...runs].slice(0, 50) });
 }

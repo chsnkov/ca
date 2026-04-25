@@ -1,10 +1,28 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getTask, syncParentTask } from '../../../lib/clickup';
+import { getTask, syncParentTask, verifyWebhook } from '../../../lib/clickup';
 import { getConfig, appendRun } from '../../../lib/store';
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json();
+    const rawBody = await req.text();
+    const webhookSecret = process.env.CLICKUP_WEBHOOK_SECRET;
+    const signature =
+      req.headers.get('x-signature') ||
+      req.headers.get('x-clickup-signature') ||
+      '';
+
+    if (webhookSecret && !verifyWebhook(rawBody, webhookSecret, signature)) {
+      await appendRun({
+        type: 'webhook',
+        message: 'WEBHOOK SYNC: unauthorized signature',
+        action: 'unauthorized_signature',
+        timestamp: Date.now(),
+      });
+
+      return NextResponse.json({ ok: false, error: 'invalid_signature' }, { status: 401 });
+    }
+
+    const body = JSON.parse(rawBody);
 
     const event = body.event;
     const taskId = body.task_id;
@@ -39,21 +57,26 @@ export async function POST(req: NextRequest) {
     }
 
     if (!task.parent) {
+      const result = await syncParentTask(String(task.id));
+
       await appendRun({
         type: 'webhook',
-        message: 'WEBHOOK SYNC: ignored (not subtask)',
-        action: 'ignored_not_subtask',
+        message: 'WEBHOOK SYNC: parent task synced',
+        action: 'synced_parent_task',
         taskId,
         taskListId,
+        taskName: task.name,
+        status: task.status?.status,
+        result,
         timestamp: Date.now(),
       });
 
-      return NextResponse.json({ ok: true, ignored: 'not_subtask' });
+      return NextResponse.json({ ok: true, parentSynced: String(task.id), result });
     }
 
     const parentId = String(task.parent);
 
-    await syncParentTask(parentId);
+    const result = await syncParentTask(parentId);
 
     await appendRun({
       type: 'webhook',
@@ -64,12 +87,14 @@ export async function POST(req: NextRequest) {
       taskName: task.name,
       status: task.status?.status,
       listId: taskListId,
+      result,
       timestamp: Date.now(),
     });
 
     return NextResponse.json({
       ok: true,
       parentSynced: parentId,
+      result,
     });
   } catch (err: any) {
     await appendRun({
@@ -83,6 +108,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       ok: false,
       error: err?.message || 'unknown_error',
-    });
+    }, { status: 500 });
   }
 }

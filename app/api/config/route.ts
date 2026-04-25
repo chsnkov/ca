@@ -1,12 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { saveConfig, appendRun } from '../../../lib/store';
+import { isRequestAuthenticated, unauthorizedRedirect } from '../../../lib/auth';
+import { setupWebhooks } from '../../../lib/webhooks';
 
 export async function POST(req: NextRequest) {
+  if (!isRequestAuthenticated(req)) {
+    return unauthorizedRedirect(req);
+  }
+
   try {
     const form = await req.formData();
 
     const raw = form.getAll('selectedListIds');
-    let selectedListIds = raw.map(String).filter(Boolean);
+    let selectedListIds = [...new Set(raw.map(String).filter(Boolean))];
 
     if (!selectedListIds.length) {
       const single = form.get('selectedListIds');
@@ -31,12 +37,13 @@ export async function POST(req: NextRequest) {
     });
 
     try {
-      await fetch(req.nextUrl.origin + '/api/setup-webhook');
+      const setupResult = await setupWebhooks(req.nextUrl.origin, selectedListIds);
 
       await appendRun({
         type: 'config',
         message: 'WEBHOOK SETUP OK',
         selectedListIds,
+        setupResult,
         timestamp: Date.now(),
       });
     } catch (e: any) {

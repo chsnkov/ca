@@ -1,11 +1,32 @@
 import { getConfig, getStats } from '../lib/store';
 import { getLists } from '../lib/clickup';
-import { cookies } from 'next/headers';
+import { isAuthenticated } from '../lib/auth';
 
 // noop: trigger redeploy v2
 export const dynamic = 'force-dynamic';
 
-type ListItem = { id: string; name: string };
+type ListItem = {
+  id: string;
+  name: string;
+  spaceId?: string;
+  spaceName?: string;
+  folderId?: string | null;
+  folderName?: string | null;
+};
+
+function listPath(list: ListItem) {
+  return [list.spaceName, list.folderName].filter(Boolean).join(' / ');
+}
+
+type FolderGroup = {
+  label: string;
+  lists: ListItem[];
+};
+
+type SpaceGroup = {
+  label: string;
+  folders: FolderGroup[];
+};
 
 function LoginForm({ error }: { error?: string }) {
   return (
@@ -29,6 +50,27 @@ function LoginForm({ error }: { error?: string }) {
 
 function Dashboard({ stats, lists, selectedListIds }: { stats: any; lists: ListItem[]; selectedListIds: string[] }) {
   const selectedLists = lists.filter(l => selectedListIds.includes(l.id));
+  const groupedLists = lists.reduce<SpaceGroup[]>((groups, list) => {
+    const spaceLabel = list.spaceName || 'Unsorted';
+    const folderLabel = list.folderName || 'No folder';
+    let space = groups.find((group) => group.label === spaceLabel);
+
+    if (!space) {
+      space = { label: spaceLabel, folders: [] };
+      groups.push(space);
+    }
+
+    let folder = space.folders.find((group) => group.label === folderLabel);
+
+    if (!folder) {
+      folder = { label: folderLabel, lists: [] };
+      space.folders.push(folder);
+    }
+
+    folder.lists.push(list);
+
+    return groups;
+  }, []);
 
   return (
     <main style={{ padding: 20, fontFamily: 'sans-serif', maxWidth: 900, margin: '0 auto' }}>
@@ -40,7 +82,7 @@ function Dashboard({ stats, lists, selectedListIds }: { stats: any; lists: ListI
       </div>
 
       <section style={{ margin: '20px 0', padding: 16, border: '1px solid #0a0', borderRadius: 8 }}>
-        <h2>Active Lists</h2>
+        <h2>Active Lists ({selectedLists.length})</h2>
 
         {selectedLists.length === 0 && (
           <div style={{ color: '#888' }}>No lists selected</div>
@@ -49,7 +91,9 @@ function Dashboard({ stats, lists, selectedListIds }: { stats: any; lists: ListI
         {selectedLists.map(list => (
           <div key={list.id} style={{ padding: '6px 0', borderBottom: '1px solid #222' }}>
             <strong>{list.name}</strong>
-            <div style={{ fontSize: 12, color: '#888' }}>{list.id}</div>
+            <div style={{ fontSize: 12, color: '#888' }}>
+              {listPath(list) ? `${listPath(list)} / ${list.id}` : list.id}
+            </div>
           </div>
         ))}
       </section>
@@ -57,18 +101,62 @@ function Dashboard({ stats, lists, selectedListIds }: { stats: any; lists: ListI
       <section style={{ margin: '20px 0', padding: 16, border: '1px solid #333', borderRadius: 8 }}>
         <h2>Select Lists</h2>
         <form method="post" action="/api/config" style={{ display: 'grid', gap: 12 }}>
-          <select
-            name="selectedListIds"
-            multiple
-            defaultValue={selectedListIds}
-            style={{ padding: 10, height: 200 }}
-          >
-            {lists.map((list) => (
-              <option key={list.id} value={list.id}>
-                {list.name} ({list.id})
-              </option>
-            ))}
-          </select>
+          <div style={{ display: 'grid', gap: 8 }}>
+            {groupedLists.map((space) => {
+              const spaceListCount = space.folders.reduce((total, folder) => total + folder.lists.length, 0);
+              const selectedSpaceCount = space.folders.reduce(
+                (total, folder) => total + folder.lists.filter((list) => selectedListIds.includes(list.id)).length,
+                0
+              );
+
+              return (
+                <details
+                  key={space.label}
+                  open={selectedSpaceCount > 0}
+                  style={{ border: '1px solid #222', borderRadius: 6, overflow: 'hidden' }}
+                >
+                  <summary style={{ cursor: 'pointer', padding: 10, background: '#111827' }}>
+                    <strong>{space.label}</strong>
+                    <span style={{ color: '#888', marginLeft: 8 }}>
+                      {selectedSpaceCount}/{spaceListCount}
+                    </span>
+                  </summary>
+                  <div style={{ display: 'grid', gap: 8, padding: 10 }}>
+                    {space.folders.map((folder) => {
+                      const selectedFolderCount = folder.lists.filter((list) => selectedListIds.includes(list.id)).length;
+
+                      return (
+                        <details
+                          key={folder.label}
+                          open={selectedFolderCount > 0}
+                          style={{ border: '1px solid #1f2937', borderRadius: 6, overflow: 'hidden' }}
+                        >
+                          <summary style={{ cursor: 'pointer', padding: 8, background: '#0f172a' }}>
+                            <strong>{folder.label}</strong>
+                            <span style={{ color: '#888', marginLeft: 8 }}>
+                              {selectedFolderCount}/{folder.lists.length}
+                            </span>
+                          </summary>
+                          <select
+                            name="selectedListIds"
+                            multiple
+                            defaultValue={selectedListIds}
+                            style={{ width: '100%', padding: 10, height: Math.min(220, Math.max(80, folder.lists.length * 34)) }}
+                          >
+                            {folder.lists.map((list) => (
+                              <option key={list.id} value={list.id}>
+                                {list.name} ({list.id})
+                              </option>
+                            ))}
+                          </select>
+                        </details>
+                      );
+                    })}
+                  </div>
+                </details>
+              );
+            })}
+          </div>
           <button type="submit">Save Selected Lists</button>
         </form>
       </section>
@@ -100,8 +188,7 @@ function Dashboard({ stats, lists, selectedListIds }: { stats: any; lists: ListI
 }
 
 export default async function Page(props: { searchParams?: Promise<{ error?: string }> }) {
-  const cookieStore = await cookies();
-  const isAuthed = cookieStore.get('ca_auth')?.value === '1';
+  const isAuthed = await isAuthenticated();
   const searchParams = await props.searchParams;
 
   if (!isAuthed) {

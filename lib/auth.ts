@@ -1,24 +1,34 @@
+import { NextRequest, NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
-import { createHash } from 'crypto';
 
-const COOKIE = 'ca_session';
+export const AUTH_COOKIE = 'ca_auth';
 
-const hash = (v: string) => createHash('sha256').update(v).digest('hex');
+export function checkCreds(login: string, password: string) {
+  return login === process.env.ADMIN_LOGIN && password === process.env.ADMIN_PASSWORD;
+}
 
 export async function isAuthenticated() {
-  const c = (await cookies()).get(COOKIE)?.value;
-  const expected = hash(`${process.env.ADMIN_LOGIN}:${process.env.ADMIN_PASSWORD}`);
-  return c === expected;
+  return (await cookies()).get(AUTH_COOKIE)?.value === '1';
 }
 
-export async function login() {
-  (await cookies()).set(COOKIE, hash(`${process.env.ADMIN_LOGIN}:${process.env.ADMIN_PASSWORD}`));
+export function isRequestAuthenticated(req: NextRequest) {
+  return req.cookies.get(AUTH_COOKIE)?.value === '1';
 }
 
-export async function logout() {
-  (await cookies()).set(COOKIE, '', { maxAge: 0 });
+export function setAuthCookie(res: NextResponse) {
+  res.cookies.set(AUTH_COOKIE, '1', {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'lax',
+    path: '/',
+    maxAge: 60 * 60 * 24 * 7,
+  });
 }
 
-export function checkCreds(l: string, p: string) {
-  return l === process.env.ADMIN_LOGIN && p === process.env.ADMIN_PASSWORD;
+export function clearAuthCookie(res: NextResponse) {
+  res.cookies.set(AUTH_COOKIE, '', { maxAge: 0, path: '/' });
+}
+
+export function unauthorizedRedirect(req: NextRequest) {
+  return NextResponse.redirect(new URL('/?error=unauthorized', req.url), { status: 303 });
 }
