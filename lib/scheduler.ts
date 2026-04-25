@@ -1,17 +1,17 @@
 import { syncLists } from './clickup';
 import { appendRun, getConfig, getStats } from './store';
 
-const DEFAULT_SYNC_INTERVAL_HOURS = 2;
+const DEFAULT_SYNC_INTERVAL_MINUTES = 120;
 
-export function normalizeSyncIntervalHours(value: unknown) {
+export function normalizeSyncIntervalMinutes(value: unknown) {
   const parsed = Number(value);
-  const allowed = [1, 2, 3, 4, 6, 8, 12, 24];
+  const allowed = [5, 10, 15, 30, 45, 60, 90, 120, 180, 240, 360, 480, 720, 1440];
 
   if (allowed.includes(parsed)) {
     return parsed;
   }
 
-  return DEFAULT_SYNC_INTERVAL_HOURS;
+  return DEFAULT_SYNC_INTERVAL_MINUTES;
 }
 
 export function getLastScheduledRunAt(stats: any) {
@@ -25,20 +25,21 @@ export function getLastScheduledRunAt(stats: any) {
   return Number.isNaN(date.getTime()) ? null : date.toISOString();
 }
 
-export function getNextScheduledRunAt(lastRunAt: string | null, intervalHours: number) {
+export function getNextScheduledRunAt(lastRunAt: string | null, intervalMinutes: number) {
   if (!lastRunAt) return null;
 
-  const next = new Date(new Date(lastRunAt).getTime() + intervalHours * 60 * 60 * 1000);
+  const next = new Date(new Date(lastRunAt).getTime() + intervalMinutes * 60 * 1000);
   return Number.isNaN(next.getTime()) ? null : next.toISOString();
 }
 
 export function getScheduleSummary(config: any, stats: any) {
-  const syncIntervalHours = normalizeSyncIntervalHours(config?.syncIntervalHours);
+  const legacyIntervalMinutes = config?.syncIntervalHours ? Number(config.syncIntervalHours) * 60 : undefined;
+  const syncIntervalMinutes = normalizeSyncIntervalMinutes(config?.syncIntervalMinutes ?? legacyIntervalMinutes);
   const lastScheduledRunAt = getLastScheduledRunAt(stats);
-  const nextScheduledRunAt = getNextScheduledRunAt(lastScheduledRunAt, syncIntervalHours);
+  const nextScheduledRunAt = getNextScheduledRunAt(lastScheduledRunAt, syncIntervalMinutes);
 
   return {
-    syncIntervalHours,
+    syncIntervalMinutes,
     lastScheduledRunAt,
     nextScheduledRunAt,
   };
@@ -94,7 +95,7 @@ export async function runScheduledSync() {
       date: finishedAt,
       schedule: {
         ...schedule,
-        nextScheduledRunAt: getNextScheduledRunAt(finishedAt, schedule.syncIntervalHours),
+        nextScheduledRunAt: getNextScheduledRunAt(finishedAt, schedule.syncIntervalMinutes),
       },
     });
 

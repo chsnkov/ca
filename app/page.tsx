@@ -54,7 +54,7 @@ function Dashboard({
   stats,
   lists,
   selectedListIds,
-  syncIntervalHours,
+  syncIntervalMinutes,
   lastScheduledRunAt,
   nextScheduledRunAt,
   schedulerReady,
@@ -62,7 +62,7 @@ function Dashboard({
   stats: any;
   lists: ListItem[];
   selectedListIds: string[];
-  syncIntervalHours: number;
+  syncIntervalMinutes: number;
   lastScheduledRunAt: string | null;
   nextScheduledRunAt: string | null;
   schedulerReady: boolean;
@@ -120,11 +120,11 @@ function Dashboard({
         <h2>Select Lists</h2>
         <form method="post" action="/api/config" style={{ display: 'grid', gap: 12 }}>
           <label style={{ display: 'grid', gap: 6 }}>
-            <span>Auto sync interval</span>
-            <select name="syncIntervalHours" defaultValue={String(syncIntervalHours)} style={{ padding: 10 }}>
-              {[1, 2, 3, 4, 6, 8, 12, 24].map((hours) => (
-                <option key={hours} value={hours}>
-                  Every {hours} hour{hours === 1 ? '' : 's'}
+            <span>Auto sync interval (minutes)</span>
+            <select name="syncIntervalMinutes" defaultValue={String(syncIntervalMinutes)} style={{ padding: 10 }}>
+              {[5, 10, 15, 30, 45, 60, 90, 120, 180, 240, 360, 480, 720, 1440].map((minutes) => (
+                <option key={minutes} value={minutes}>
+                  Every {minutes} minutes
                 </option>
               ))}
             </select>
@@ -198,7 +198,7 @@ function Dashboard({
             </div>
           )}
           <div>
-            Auto sync: every <strong>{syncIntervalHours}</strong> hour{syncIntervalHours === 1 ? '' : 's'}
+            Auto sync: every <strong>{syncIntervalMinutes}</strong> minutes
           </div>
           <div>
             Last auto sync: <strong>{lastScheduledRunAt ? new Date(lastScheduledRunAt).toLocaleString() : 'never'}</strong>
@@ -255,7 +255,7 @@ export default async function Page(props: { searchParams?: Promise<{ error?: str
       stats={stats}
       lists={lists}
       selectedListIds={selectedListIds}
-      syncIntervalHours={schedule.syncIntervalHours}
+      syncIntervalMinutes={schedule.syncIntervalMinutes}
       lastScheduledRunAt={schedule.lastScheduledRunAt}
       nextScheduledRunAt={schedule.nextScheduledRunAt}
       schedulerReady={Boolean(process.env.ADMIN_TOKEN)}

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { saveConfig, appendRun } from '../../../lib/store';
 import { isRequestAuthenticated, unauthorizedRedirect } from '../../../lib/auth';
 import { setupWebhooks } from '../../../lib/webhooks';
-import { normalizeSyncIntervalHours } from '../../../lib/scheduler';
+import { normalizeSyncIntervalMinutes } from '../../../lib/scheduler';
 
 export async function POST(req: NextRequest) {
   if (!isRequestAuthenticated(req)) {
@@ -24,31 +24,31 @@ export async function POST(req: NextRequest) {
       return NextResponse.redirect(new URL('/?error=no_list_selected', req.url), { status: 303 });
     }
 
-    const syncIntervalHours = normalizeSyncIntervalHours(form.get('syncIntervalHours'));
+    const syncIntervalMinutes = normalizeSyncIntervalMinutes(form.get('syncIntervalMinutes'));
 
     await appendRun({
       type: 'config',
       message: 'UI LIST SELECTION',
       selectedListIds,
-      syncIntervalHours,
+      syncIntervalMinutes,
       raw,
       timestamp: Date.now(),
     });
 
     await saveConfig({
       selectedListIds,
-      syncIntervalHours,
+      syncIntervalMinutes,
       managedWebhooks: [],
     });
 
     try {
-      const setupResult = await setupWebhooks(req.nextUrl.origin, selectedListIds, { syncIntervalHours });
+      const setupResult = await setupWebhooks(req.nextUrl.origin, selectedListIds, { syncIntervalMinutes });
 
       await appendRun({
         type: 'config',
         message: 'WEBHOOK SETUP OK',
         selectedListIds,
-        syncIntervalHours,
+        syncIntervalMinutes,
         setupResult,
         timestamp: Date.now(),
       });
@@ -58,7 +58,7 @@ export async function POST(req: NextRequest) {
         message: 'WEBHOOK SETUP FAILED',
         error: e?.message,
         selectedListIds,
-        syncIntervalHours,
+        syncIntervalMinutes,
         timestamp: Date.now(),
       });
     }
