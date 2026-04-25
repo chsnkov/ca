@@ -28,7 +28,7 @@ async function getListName(listId: string) {
   }
 }
 
-export async function setupWebhooks(origin: string, listIds?: string[]) {
+export async function setupWebhooks(origin: string, listIds?: string[], configPatch: Record<string, unknown> = {}) {
   const teams = await clickupReq('/team');
   const teamId = teams?.teams?.[0]?.id;
 
@@ -85,6 +85,7 @@ export async function setupWebhooks(origin: string, listIds?: string[]) {
 
   await saveConfig({
     ...config,
+    ...configPatch,
     selectedListIds,
     managedWebhooks: createdWebhooks,
   });

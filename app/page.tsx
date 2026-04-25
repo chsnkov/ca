@@ -1,6 +1,8 @@
 import { getConfig, getStats } from '../lib/store';
 import { getLists } from '../lib/clickup';
 import { isAuthenticated } from '../lib/auth';
+import { getScheduleSummary } from '../lib/scheduler';
+import ScheduleTimer from './schedule-timer';
 
 // noop: trigger redeploy v2
 export const dynamic = 'force-dynamic';
@@ -48,7 +50,23 @@ function LoginForm({ error }: { error?: string }) {
   );
 }
 
-function Dashboard({ stats, lists, selectedListIds }: { stats: any; lists: ListItem[]; selectedListIds: string[] }) {
+function Dashboard({
+  stats,
+  lists,
+  selectedListIds,
+  syncIntervalHours,
+  lastScheduledRunAt,
+  nextScheduledRunAt,
+  schedulerReady,
+}: {
+  stats: any;
+  lists: ListItem[];
+  selectedListIds: string[];
+  syncIntervalHours: number;
+  lastScheduledRunAt: string | null;
+  nextScheduledRunAt: string | null;
+  schedulerReady: boolean;
+}) {
   const selectedLists = lists.filter(l => selectedListIds.includes(l.id));
   const groupedLists = lists.reduce<SpaceGroup[]>((groups, list) => {
     const spaceLabel = list.spaceName || 'Unsorted';
@@ -101,6 +119,16 @@ function Dashboard({ stats, lists, selectedListIds }: { stats: any; lists: ListI
       <section style={{ margin: '20px 0', padding: 16, border: '1px solid #333', borderRadius: 8 }}>
         <h2>Select Lists</h2>
         <form method="post" action="/api/config" style={{ display: 'grid', gap: 12 }}>
+          <label style={{ display: 'grid', gap: 6 }}>
+            <span>Auto sync interval</span>
+            <select name="syncIntervalHours" defaultValue={String(syncIntervalHours)} style={{ padding: 10 }}>
+              {[1, 2, 3, 4, 6, 8, 12, 24].map((hours) => (
+                <option key={hours} value={hours}>
+                  Every {hours} hour{hours === 1 ? '' : 's'}
+                </option>
+              ))}
+            </select>
+          </label>
           <div style={{ display: 'grid', gap: 8 }}>
             {groupedLists.map((space) => {
               const spaceListCount = space.folders.reduce((total, folder) => total + folder.lists.length, 0);
@@ -162,8 +190,26 @@ function Dashboard({ stats, lists, selectedListIds }: { stats: any; lists: ListI
       </section>
 
       <section style={{ margin: '20px 0', padding: 16, border: '1px solid #333', borderRadius: 8 }}>
-        <h2>Manual Run</h2>
-        <p>Runs a full sync for all selected lists.</p>
+        <h2>Sync</h2>
+        <div style={{ display: 'grid', gap: 8, marginBottom: 14 }}>
+          {!schedulerReady && (
+            <div style={{ background: '#331b00', color: '#fbbf24', padding: 10, border: '1px solid #92400e' }}>
+              Auto sync needs ADMIN_TOKEN in Vercel production env.
+            </div>
+          )}
+          <div>
+            Auto sync: every <strong>{syncIntervalHours}</strong> hour{syncIntervalHours === 1 ? '' : 's'}
+          </div>
+          <div>
+            Last auto sync: <strong>{lastScheduledRunAt ? new Date(lastScheduledRunAt).toLocaleString() : 'never'}</strong>
+          </div>
+          <div>
+            Next auto sync: <strong>{nextScheduledRunAt ? new Date(nextScheduledRunAt).toLocaleString() : 'after the next scheduler tick'}</strong>
+          </div>
+          <div>
+            Timer: <strong><ScheduleTimer nextRunAt={nextScheduledRunAt} /></strong>
+          </div>
+        </div>
         <form method="post" action="/api/run?redirect=1">
           <button type="submit">Run Full Sync</button>
         </form>
@@ -202,6 +248,17 @@ export default async function Page(props: { searchParams?: Promise<{ error?: str
   ]);
 
   const selectedListIds = config?.selectedListIds || [];
+  const schedule = getScheduleSummary(config, stats);
 
-  return <Dashboard stats={stats} lists={lists} selectedListIds={selectedListIds} />;
+  return (
+    <Dashboard
+      stats={stats}
+      lists={lists}
+      selectedListIds={selectedListIds}
+      syncIntervalHours={schedule.syncIntervalHours}
+      lastScheduledRunAt={schedule.lastScheduledRunAt}
+      nextScheduledRunAt={schedule.nextScheduledRunAt}
+      schedulerReady={Boolean(process.env.ADMIN_TOKEN)}
+    />
+  );
 }

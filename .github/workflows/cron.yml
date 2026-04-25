@@ -2,7 +2,7 @@ name: Scheduled Sync
 
 on:
   schedule:
-    - cron: "0 3,5,7,9,11,13,15 * * *"
+    - cron: "0 * * * *"
 
 jobs:
   trigger:
@@ -11,6 +11,6 @@ jobs:
     steps:
       - name: Call API
         run: |
-          curl -X POST https://ca.vercel.app/api/run \
+          curl -X POST https://ca-gules.vercel.app/api/scheduled \
           -H "Content-Type: application/json" \
           -d '{"token":"${{ secrets.ADMIN_TOKEN }}"}'
