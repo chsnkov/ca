@@ -9,7 +9,7 @@ async function clickupReq(path: string, init?: RequestInit) {
   const res = await fetch(API + path, {
     ...init,
     headers: {
-      Authorization: process.env.CLICKUP_TOKEN || '',
+      Authorization: `Bearer ${process.env.CLICKUP_TOKEN}`,
       'Content-Type': 'application/json',
       ...(init?.headers || {}),
     },
