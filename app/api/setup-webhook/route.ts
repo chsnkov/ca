@@ -1,3 +1,5 @@
+export const runtime = 'nodejs';
+
 import { NextRequest, NextResponse } from 'next/server';
 import { getConfig } from '../../../lib/store';
 
@@ -20,7 +22,6 @@ async function clickupReq(path: string, init?: RequestInit) {
   return res.json();
 }
 
-// fixed: no export here
 async function setupWebhooks(origin: string) {
   const teams = await clickupReq('/team');
   const teamId = teams?.teams?.[0]?.id;
@@ -66,4 +67,8 @@ export async function GET(req: NextRequest) {
   } catch (err: any) {
     return NextResponse.json({ ok: false, error: err.message });
   }
+}
+
+export async function POST() {
+  return NextResponse.json({ ok: true });
 }
