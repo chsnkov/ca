@@ -3,6 +3,8 @@ import { createHmac, timingSafeEqual } from 'crypto';
 const API = 'https://api.clickup.com/api/v2';
 const PAGE_SIZE = 100;
 
+type FieldCache = Map<string, any[]>;
+
 const token = () => {
   if (!process.env.CLICKUP_TOKEN) throw new Error('no token');
   return process.env.CLICKUP_TOKEN;
@@ -97,9 +99,20 @@ async function getRootTasksFromList(listId: string) {
   };
 }
 
+async function getFieldsForList(listId: string, fieldCache?: FieldCache) {
+  const key = String(listId);
+  const cached = fieldCache?.get(key);
+
+  if (cached) return cached;
+
+  const fields = ((await req(`/list/${key}/field`)).fields || []) as any[];
+  fieldCache?.set(key, fields);
+  return fields;
+}
+
 export const getTask = (id: string) => req(`/task/${id}?include_subtasks=true`);
 
-export async function syncParentTask(id: string) {
+export async function syncParentTask(id: string, fieldCache?: FieldCache) {
   const t = (await getTask(id)) as ClickUpTask;
   const list = t.list?.id;
 
@@ -113,7 +126,7 @@ export async function syncParentTask(id: string) {
     };
   }
 
-  const fields = ((await req(`/list/${list}/field`)).fields || []) as any[];
+  const fields = await getFieldsForList(list, fieldCache);
   const subtasks = (t.subtasks || []).filter((sub) => String(sub.parent || '') === String(id));
 
   let u = 0;
@@ -204,26 +217,56 @@ export async function syncLists(ids: string[]) {
   let e = 0;
   const details: any[] = [];
   const discovery: any[] = [];
+  const fieldCache: FieldCache = new Map();
+
+  console.log('[syncLists] started', { listCount: ids.length, listIds: ids.map(String) });
 
   for (const id of ids) {
-    const { rootTasks, discovery: listDiscovery } = await getRootTasksFromList(id);
+    const listId = String(id);
+    const startedAt = Date.now();
+    console.log('[syncLists] list started', { listId });
+
+    const { rootTasks, discovery: listDiscovery } = await getRootTasksFromList(listId);
     discovery.push(listDiscovery);
 
+    console.log('[syncLists] list discovered', {
+      listId,
+      pagesFetched: listDiscovery.pagesFetched,
+      totalApiItems: listDiscovery.totalApiItems,
+      totalRootTasks: rootTasks.length,
+    });
+
     if (!rootTasks.length) {
-      details.push({ listId: String(id), action: 'ignored', reason: 'no_root_tasks_detected' });
+      details.push({ listId, action: 'ignored', reason: 'no_root_tasks_detected' });
       continue;
     }
 
+    await getFieldsForList(listId, fieldCache);
+
+    let processed = 0;
     for (const rootTask of rootTasks) {
-      const r = await syncParentTask(String(rootTask.id));
+      const r = await syncParentTask(String(rootTask.id), fieldCache);
       u += r.updated;
       s += r.skipped;
       i += r.ignored;
       e += r.errors;
+      processed += 1;
       details.push(...(r.details || []));
+
+      if (processed % 25 === 0) {
+        console.log('[syncLists] list progress', { listId, processed, totalRootTasks: rootTasks.length });
+      }
     }
+
+    console.log('[syncLists] list completed', {
+      listId,
+      processed,
+      totalRootTasks: rootTasks.length,
+      elapsedMs: Date.now() - startedAt,
+    });
   }
 
+  console.log('[syncLists] completed', { updated: u, skipped: s, ignored: i, errors: e });
   return { updated: u, skipped: s, ignored: i, errors: e, details, discovery };
 }
 
