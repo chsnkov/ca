@@ -7,6 +7,17 @@ import ScheduleTimer from './schedule-timer';
 // noop: trigger redeploy v2
 export const dynamic = 'force-dynamic';
 
+const tashkentDateFormatter = new Intl.DateTimeFormat('ru-RU', {
+  timeZone: 'Asia/Tashkent',
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+  hour: '2-digit',
+  minute: '2-digit',
+  second: '2-digit',
+  hour12: false,
+});
+
 type ListItem = {
   id: string;
   name: string;
@@ -18,6 +29,11 @@ type ListItem = {
 
 function listPath(list: ListItem) {
   return [list.spaceName, list.folderName].filter(Boolean).join(' / ');
+}
+
+function formatTashkentDate(value: string) {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? value : tashkentDateFormatter.format(date);
 }
 
 type FolderGroup = {
@@ -215,10 +231,10 @@ function Dashboard({
             Auto sync: every <strong>{syncIntervalMinutes}</strong> minutes
           </div>
           <div>
-            Last auto sync: <strong>{lastScheduledRunAt ? new Date(lastScheduledRunAt).toLocaleString() : 'never'}</strong>
+            Last auto sync: <strong>{lastScheduledRunAt ? formatTashkentDate(lastScheduledRunAt) : 'never'}</strong>
           </div>
           <div>
-            Next auto sync: <strong>{nextScheduledRunAt ? new Date(nextScheduledRunAt).toLocaleString() : 'after the next scheduler tick'}</strong>
+            Next auto sync: <strong>{nextScheduledRunAt ? formatTashkentDate(nextScheduledRunAt) : 'after the next scheduler tick'}</strong>
           </div>
           <div>
             Timer: <strong><ScheduleTimer nextRunAt={nextScheduledRunAt} /></strong>
