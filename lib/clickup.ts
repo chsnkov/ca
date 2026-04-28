@@ -140,6 +140,15 @@ async function getFieldsForList(listId: string, cache?: FieldCache) {
   return fields;
 }
 
+async function getTeamId() {
+  if (process.env.CLICKUP_TEAM_ID) return process.env.CLICKUP_TEAM_ID;
+
+  const data = await req('/team');
+  const team = data?.teams?.[0];
+  if (!team?.id) throw new Error('No ClickUp workspaces available for CLICKUP_TOKEN');
+  return String(team.id);
+}
+
 export async function getTask(id: string) {
   return req(`/task/${id}?include_subtasks=true`);
 }
@@ -323,8 +332,7 @@ export function verifyWebhook(raw: string, secretOrSignature?: string | null, si
 }
 
 export async function getLists() {
-  const teamId = process.env.CLICKUP_TEAM_ID;
-  if (!teamId) throw new Error('CLICKUP_TEAM_ID missing');
+  const teamId = await getTeamId();
   const spaces = await req(`/team/${teamId}/space?archived=false`);
   const out: any[] = [];
   for (const sp of spaces.spaces || []) {
