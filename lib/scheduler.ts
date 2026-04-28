@@ -2,12 +2,17 @@ import { syncLists } from './clickup';
 import { appendRun, getConfig, getStats } from './store';
 
 const DEFAULT_SYNC_INTERVAL_MINUTES = 120;
+const MIN_SYNC_INTERVAL_MINUTES = 5;
+const MAX_SYNC_INTERVAL_MINUTES = 1440;
 
 export function normalizeSyncIntervalMinutes(value: unknown) {
   const parsed = Number(value);
-  const allowed = [5, 10, 15, 30, 45, 60, 90, 120, 180, 240, 360, 480, 720, 1440];
 
-  if (allowed.includes(parsed)) {
+  if (
+    Number.isInteger(parsed) &&
+    parsed >= MIN_SYNC_INTERVAL_MINUTES &&
+    parsed <= MAX_SYNC_INTERVAL_MINUTES
+  ) {
     return parsed;
   }
 
