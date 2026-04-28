@@ -52,6 +52,14 @@ export async function runScheduledSync() {
   const dueAt = schedule.nextScheduledRunAt ? new Date(schedule.nextScheduledRunAt) : null;
   const isDue = !dueAt || now.getTime() >= dueAt.getTime();
 
+  console.log('[scheduled] checked schedule', {
+    isDue,
+    now: now.toISOString(),
+    syncIntervalMinutes: schedule.syncIntervalMinutes,
+    lastScheduledRunAt: schedule.lastScheduledRunAt,
+    nextScheduledRunAt: schedule.nextScheduledRunAt,
+  });
+
   if (!isDue) {
     return {
       ok: true,
@@ -74,6 +82,8 @@ export async function runScheduledSync() {
       schedule,
     });
 
+    console.warn('[scheduled] skipped without selected lists');
+
     return {
       ok: false,
       skipped: true,
@@ -84,6 +94,8 @@ export async function runScheduledSync() {
   }
 
   try {
+    console.log('[scheduled] sync started', { listCount: listIds.length, listIds });
+
     const result = await syncLists(listIds);
     const finishedAt = new Date().toISOString();
 
@@ -99,6 +111,14 @@ export async function runScheduledSync() {
       },
     });
 
+    console.log('[scheduled] sync completed', {
+      finishedAt,
+      updated: result.updated,
+      skipped: result.skipped,
+      ignored: result.ignored,
+      errors: result.errors,
+    });
+
     return {
       ok: true,
       skipped: false,
@@ -108,6 +128,8 @@ export async function runScheduledSync() {
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : 'scheduled_sync_failed';
+
+    console.error('[scheduled] sync failed', { error: message });
 
     await appendRun({
       type: 'scheduled',
