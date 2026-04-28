@@ -53,6 +53,7 @@ function LoginForm({ error }: { error?: string }) {
 function Dashboard({
   stats,
   lists,
+  listsError,
   selectedListIds,
   syncIntervalMinutes,
   lastScheduledRunAt,
@@ -61,6 +62,7 @@ function Dashboard({
 }: {
   stats: any;
   lists: ListItem[];
+  listsError?: string;
   selectedListIds: string[];
   syncIntervalMinutes: number;
   lastScheduledRunAt: string | null;
@@ -98,6 +100,12 @@ function Dashboard({
           <button type="submit">Logout</button>
         </form>
       </div>
+
+      {listsError && (
+        <section style={{ margin: '20px 0', padding: 16, border: '1px solid #92400e', background: '#331b00', color: '#fbbf24', borderRadius: 8 }}>
+          <strong>ClickUp lists unavailable:</strong> {listsError}
+        </section>
+      )}
 
       <section style={{ margin: '20px 0', padding: 16, border: '1px solid #0a0', borderRadius: 8 }}>
         <h2>Active Lists ({selectedLists.length})</h2>
@@ -175,7 +183,7 @@ function Dashboard({
               );
             })}
           </div>
-          <button type="submit">Save Selected Lists</button>
+          <button type="submit" disabled={Boolean(listsError)}>Save Selected Lists</button>
         </form>
       </section>
 
@@ -239,6 +247,10 @@ function Dashboard({
   );
 }
 
+function getErrorMessage(error: unknown) {
+  return error instanceof Error ? error.message : 'Unknown error';
+}
+
 export default async function Page(props: { searchParams?: Promise<{ error?: string }> }) {
   const isAuthed = await isAuthenticated();
   const searchParams = await props.searchParams;
@@ -247,11 +259,20 @@ export default async function Page(props: { searchParams?: Promise<{ error?: str
     return <LoginForm error={searchParams?.error} />;
   }
 
-  const [stats, config, lists] = await Promise.all([
+  const [stats, config] = await Promise.all([
     getStats(),
     getConfig(),
-    getLists(),
   ]);
+
+  let lists: ListItem[] = [];
+  let listsError: string | undefined;
+
+  try {
+    lists = await getLists();
+  } catch (error) {
+    listsError = getErrorMessage(error);
+    console.error('[dashboard] failed to load ClickUp lists', { error: listsError });
+  }
 
   const selectedListIds = config?.selectedListIds || [];
   const schedule = getScheduleSummary(config, stats);
@@ -260,6 +281,7 @@ export default async function Page(props: { searchParams?: Promise<{ error?: str
     <Dashboard
       stats={stats}
       lists={lists}
+      listsError={listsError}
       selectedListIds={selectedListIds}
       syncIntervalMinutes={schedule.syncIntervalMinutes}
       lastScheduledRunAt={schedule.lastScheduledRunAt}
