@@ -4,6 +4,7 @@ import { appendRun, getConfig, getStats } from './store';
 const DEFAULT_SYNC_INTERVAL_MINUTES = 120;
 const MIN_SYNC_INTERVAL_MINUTES = 5;
 const MAX_SYNC_INTERVAL_MINUTES = 1440;
+const SYNC_INTERVAL_STEP_MINUTES = 5;
 
 export function normalizeSyncIntervalMinutes(value: unknown) {
   const parsed = Number(value);
@@ -11,7 +12,8 @@ export function normalizeSyncIntervalMinutes(value: unknown) {
   if (
     Number.isInteger(parsed) &&
     parsed >= MIN_SYNC_INTERVAL_MINUTES &&
-    parsed <= MAX_SYNC_INTERVAL_MINUTES
+    parsed <= MAX_SYNC_INTERVAL_MINUTES &&
+    parsed % SYNC_INTERVAL_STEP_MINUTES === 0
   ) {
     return parsed;
   }
