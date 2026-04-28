@@ -65,6 +65,7 @@ export function getScheduleSummary(config: any, stats: any, now = new Date()) {
 
   return {
     intervalMinutes,
+    syncIntervalMinutes: intervalMinutes,
     lastScheduledRunAt,
     nextScheduledRunAt,
     due,
