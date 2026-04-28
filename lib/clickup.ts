@@ -140,7 +140,7 @@ async function getFieldsForList(listId: string, cache?: FieldCache) {
   return fields;
 }
 
-async function getTask(id: string) {
+export async function getTask(id: string) {
   return req(`/task/${id}?include_subtasks=true`);
 }
 
@@ -310,12 +310,16 @@ export async function syncLists(listIds: string[]) {
   return { ...result, discovery };
 }
 
-export function verifyWebhook(raw: string, signature?: string | null) {
-  const secret = process.env.CLICKUP_WEBHOOK_SECRET;
+export function verifyWebhook(raw: string, secretOrSignature?: string | null, signatureMaybe?: string | null) {
+  const secret = signatureMaybe === undefined ? process.env.CLICKUP_WEBHOOK_SECRET : secretOrSignature;
+  const signature = signatureMaybe === undefined ? secretOrSignature : signatureMaybe;
   if (!secret) return true;
   if (!signature) return false;
+
   const h = crypto.createHmac('sha256', secret).update(raw).digest('hex');
-  return crypto.timingSafeEqual(Buffer.from(h), Buffer.from(signature));
+  const expected = Buffer.from(h);
+  const received = Buffer.from(signature);
+  return expected.length === received.length && crypto.timingSafeEqual(expected, received);
 }
 
 export async function getLists() {

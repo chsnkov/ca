@@ -1,4 +1,5 @@
-import { discoverUpdatedRootTasks, syncParentTasks, SyncTotals } from './clickup';
+import { discoverUpdatedRootTasks, syncParentTasks } from './clickup';
+import type { SyncTotals } from './clickup';
 import { appendRun, getConfig, getStats, saveConfig } from './store';
 
 const DEFAULT_AUTO_SYNC_INTERVAL_MINUTES = 120;
@@ -33,8 +34,12 @@ function normalizeAutoSyncIntervalMinutes(value: any) {
   return Math.min(MAX_AUTO_SYNC_INTERVAL_MINUTES, Math.max(MIN_AUTO_SYNC_INTERVAL_MINUTES, rounded));
 }
 
+export function normalizeSyncIntervalMinutes(value: any) {
+  return normalizeAutoSyncIntervalMinutes(value);
+}
+
 function getAutoSyncIntervalMinutes(config: any) {
-  return normalizeAutoSyncIntervalMinutes(config?.autoSyncIntervalMinutes);
+  return normalizeAutoSyncIntervalMinutes(config?.autoSyncIntervalMinutes ?? config?.syncIntervalMinutes);
 }
 
 function getLastScheduledRunAt(stats: any) {
