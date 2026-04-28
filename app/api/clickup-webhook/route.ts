@@ -23,9 +23,23 @@ export async function POST(req: NextRequest) {
     }
 
     const body = JSON.parse(rawBody);
+    const config = await getConfig();
 
     const event = body.event;
     const taskId = body.task_id;
+
+    if (config?.webhookSyncEnabled === false) {
+      await appendRun({
+        type: 'webhook',
+        message: 'WEBHOOK SYNC: ignored (disabled)',
+        action: 'ignored_disabled',
+        event,
+        taskId,
+        timestamp: Date.now(),
+      });
+
+      return NextResponse.json({ ok: true, ignored: 'webhook_sync_disabled' });
+    }
 
     if (event !== 'taskStatusUpdated') {
       return NextResponse.json({ ok: true, ignored: true });
@@ -37,7 +51,6 @@ export async function POST(req: NextRequest) {
 
     const task = await getTask(String(taskId));
 
-    const config = await getConfig();
     const selectedListIds = config?.selectedListIds || [];
 
     const taskListId = String(task?.list?.id || '');

@@ -72,6 +72,8 @@ function Dashboard({
   listsError,
   selectedListIds,
   syncIntervalMinutes,
+  autoSyncEnabled,
+  webhookSyncEnabled,
   lastScheduledRunAt,
   nextScheduledRunAt,
   schedulerReady,
@@ -81,6 +83,8 @@ function Dashboard({
   listsError?: string;
   selectedListIds: string[];
   syncIntervalMinutes: number;
+  autoSyncEnabled: boolean;
+  webhookSyncEnabled: boolean;
   lastScheduledRunAt: string | null;
   nextScheduledRunAt: string | null;
   schedulerReady: boolean;
@@ -211,6 +215,18 @@ function Dashboard({
               Auto sync needs ADMIN_TOKEN in Vercel production env.
             </div>
           )}
+          <form method="post" action="/api/config" style={{ display: 'flex', gap: 14, alignItems: 'center', flexWrap: 'wrap' }}>
+            <input type="hidden" name="configAction" value="syncToggles" />
+            <label style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+              <input name="autoSyncEnabled" type="checkbox" defaultChecked={autoSyncEnabled} />
+              <span>Auto sync</span>
+            </label>
+            <label style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+              <input name="webhookSyncEnabled" type="checkbox" defaultChecked={webhookSyncEnabled} />
+              <span>Webhook sync</span>
+            </label>
+            <button type="submit">Save Sync Toggles</button>
+          </form>
           <form method="post" action="/api/config" style={{ display: 'flex', gap: 8, alignItems: 'end', flexWrap: 'wrap' }}>
             <input type="hidden" name="configAction" value="interval" />
             <label style={{ display: 'grid', gap: 6 }}>
@@ -228,16 +244,19 @@ function Dashboard({
             <button type="submit">Save Interval</button>
           </form>
           <div>
-            Auto sync: every <strong>{syncIntervalMinutes}</strong> minutes
+            Auto sync: <strong>{autoSyncEnabled ? `every ${syncIntervalMinutes} minutes` : 'off'}</strong>
+          </div>
+          <div>
+            Webhook sync: <strong>{webhookSyncEnabled ? 'on' : 'off'}</strong>
           </div>
           <div>
             Last auto sync: <strong>{lastScheduledRunAt ? formatTashkentDate(lastScheduledRunAt) : 'never'}</strong>
           </div>
           <div>
-            Next auto sync: <strong>{nextScheduledRunAt ? formatTashkentDate(nextScheduledRunAt) : 'after the next scheduler tick'}</strong>
+            Next auto sync: <strong>{autoSyncEnabled ? (nextScheduledRunAt ? formatTashkentDate(nextScheduledRunAt) : 'after the next scheduler tick') : 'disabled'}</strong>
           </div>
           <div>
-            Timer: <strong><ScheduleTimer nextRunAt={nextScheduledRunAt} /></strong>
+            Timer: <strong>{autoSyncEnabled ? <ScheduleTimer nextRunAt={nextScheduledRunAt} /> : 'disabled'}</strong>
           </div>
         </div>
         <form method="post" action="/api/run?redirect=1">
@@ -291,6 +310,8 @@ export default async function Page(props: { searchParams?: Promise<{ error?: str
   }
 
   const selectedListIds = config?.selectedListIds || [];
+  const autoSyncEnabled = config?.autoSyncEnabled !== false;
+  const webhookSyncEnabled = config?.webhookSyncEnabled !== false;
   const schedule = getScheduleSummary(config, stats);
 
   return (
@@ -300,6 +321,8 @@ export default async function Page(props: { searchParams?: Promise<{ error?: str
       listsError={listsError}
       selectedListIds={selectedListIds}
       syncIntervalMinutes={schedule.syncIntervalMinutes}
+      autoSyncEnabled={autoSyncEnabled}
+      webhookSyncEnabled={webhookSyncEnabled}
       lastScheduledRunAt={schedule.lastScheduledRunAt}
       nextScheduledRunAt={schedule.nextScheduledRunAt}
       schedulerReady={Boolean(process.env.ADMIN_TOKEN)}

@@ -38,6 +38,10 @@ export function normalizeSyncIntervalMinutes(value: any) {
   return normalizeAutoSyncIntervalMinutes(value);
 }
 
+export function isAutoSyncEnabled(config: any) {
+  return config?.autoSyncEnabled !== false;
+}
+
 function getAutoSyncIntervalMinutes(config: any) {
   return normalizeAutoSyncIntervalMinutes(config?.syncIntervalMinutes ?? config?.autoSyncIntervalMinutes);
 }
@@ -66,11 +70,12 @@ export function getScheduleSummary(config: any, stats: any, now = new Date()) {
   const intervalMinutes = getAutoSyncIntervalMinutes(config);
   const lastScheduledRunAt = getLastScheduledRunAt(stats);
   const nextScheduledRunAt = getNextScheduledRunAt(lastScheduledRunAt, intervalMinutes);
-  const due = !nextScheduledRunAt || Date.parse(nextScheduledRunAt) <= now.getTime();
+  const due = isAutoSyncEnabled(config) && (!nextScheduledRunAt || Date.parse(nextScheduledRunAt) <= now.getTime());
 
   return {
     intervalMinutes,
     syncIntervalMinutes: intervalMinutes,
+    autoSyncEnabled: isAutoSyncEnabled(config),
     lastScheduledRunAt,
     nextScheduledRunAt,
     due,
@@ -190,11 +195,17 @@ export async function runScheduledSync() {
 
   console.log('[scheduled] check', {
     intervalMinutes: schedule.intervalMinutes,
+    autoSyncEnabled: schedule.autoSyncEnabled,
     lastScheduledRunAt: schedule.lastScheduledRunAt,
     nextScheduledRunAt: schedule.nextScheduledRunAt,
     due: schedule.due,
     running: Boolean(runningState),
   });
+
+  if (!isAutoSyncEnabled(config)) {
+    console.log('[scheduled] skipped disabled', schedule);
+    return { ok: true, skipped: true, reason: 'auto_sync_disabled', schedule };
+  }
 
   if (runningState && isLeaseActive(runningState.leaseUntil)) {
     console.log('[scheduled] already running', compactProgress(runningState));

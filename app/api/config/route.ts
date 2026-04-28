@@ -9,6 +9,10 @@ function withoutLegacyInterval(config: any) {
   return rest;
 }
 
+function isChecked(value: FormDataEntryValue | null) {
+  return value === 'on' || value === 'true' || value === '1';
+}
+
 export async function POST(req: NextRequest) {
   if (!isRequestAuthenticated(req)) {
     return unauthorizedRedirect(req);
@@ -25,6 +29,40 @@ export async function POST(req: NextRequest) {
     if (!selectedListIds.length) {
       const single = form.get('selectedListIds');
       if (single) selectedListIds = [String(single)];
+    }
+
+    if (action === 'syncToggles') {
+      const autoSyncEnabled = isChecked(form.get('autoSyncEnabled'));
+      const webhookSyncEnabled = isChecked(form.get('webhookSyncEnabled'));
+      const existingListIds = Array.isArray(currentConfig?.selectedListIds)
+        ? currentConfig.selectedListIds.map(String).filter(Boolean)
+        : [];
+      const syncIntervalMinutes = normalizeSyncIntervalMinutes(
+        currentConfig?.syncIntervalMinutes ?? currentConfig?.autoSyncIntervalMinutes,
+      );
+
+      await saveConfig({
+        ...baseConfig,
+        selectedListIds: existingListIds,
+        syncIntervalMinutes,
+        autoSyncEnabled,
+        webhookSyncEnabled,
+        autoSync: autoSyncEnabled
+          ? baseConfig.autoSync
+          : { status: 'idle', disabledAt: new Date().toISOString() },
+      });
+
+      await appendRun({
+        type: 'config',
+        message: 'SYNC TOGGLES UPDATED',
+        selectedListIds: existingListIds,
+        syncIntervalMinutes,
+        autoSyncEnabled,
+        webhookSyncEnabled,
+        timestamp: Date.now(),
+      });
+
+      return NextResponse.redirect(new URL('/', req.url), { status: 303 });
     }
 
     if (action === 'interval') {
@@ -55,7 +93,7 @@ export async function POST(req: NextRequest) {
     }
 
     const syncIntervalMinutes = normalizeSyncIntervalMinutes(
-      form.get('syncIntervalMinutes') ?? currentConfig?.syncIntervalMinutes ?? currentConfig?.autoSyncIntervalMinutes
+      form.get('syncIntervalMinutes') ?? currentConfig?.syncIntervalMinutes ?? currentConfig?.autoSyncIntervalMinutes,
     );
 
     await appendRun({
@@ -74,22 +112,33 @@ export async function POST(req: NextRequest) {
       managedWebhooks: [],
     });
 
-    try {
-      const setupResult = await setupWebhooks(req.nextUrl.origin, selectedListIds, { syncIntervalMinutes });
+    if (baseConfig.webhookSyncEnabled !== false) {
+      try {
+        const setupResult = await setupWebhooks(req.nextUrl.origin, selectedListIds, { syncIntervalMinutes });
 
+        await appendRun({
+          type: 'config',
+          message: 'WEBHOOK SETUP OK',
+          selectedListIds,
+          syncIntervalMinutes,
+          setupResult,
+          timestamp: Date.now(),
+        });
+      } catch (e: any) {
+        await appendRun({
+          type: 'config',
+          message: 'WEBHOOK SETUP FAILED',
+          error: e?.message,
+          selectedListIds,
+          syncIntervalMinutes,
+          timestamp: Date.now(),
+        });
+      }
+    } else {
       await appendRun({
         type: 'config',
-        message: 'WEBHOOK SETUP OK',
-        selectedListIds,
-        syncIntervalMinutes,
-        setupResult,
-        timestamp: Date.now(),
-      });
-    } catch (e: any) {
-      await appendRun({
-        type: 'config',
-        message: 'WEBHOOK SETUP FAILED',
-        error: e?.message,
+        message: 'WEBHOOK SETUP SKIPPED',
+        reason: 'webhook_sync_disabled',
         selectedListIds,
         syncIntervalMinutes,
         timestamp: Date.now(),
