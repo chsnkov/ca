@@ -1,168 +1,207 @@
-import { createHmac, timingSafeEqual } from 'crypto';
+import crypto from 'crypto';
 
 const API = 'https://api.clickup.com/api/v2';
 const PAGE_SIZE = 100;
 
+export type SyncTotals = {
+  updated: number;
+  skipped: number;
+  ignored: number;
+  errors: number;
+  details?: any[];
+};
+
 type FieldCache = Map<string, any[]>;
-
-const token = () => {
-  if (!process.env.CLICKUP_TOKEN) throw new Error('no token');
-  return process.env.CLICKUP_TOKEN;
-};
-
-const req = async (p: string, i?: RequestInit) => {
-  const r = await fetch(API + p, {
-    ...i,
-    headers: {
-      Authorization: token(),
-      'Content-Type': 'application/json',
-      ...(i?.headers || {}),
-    },
-  });
-
-  if (!r.ok) throw new Error(await r.text());
-  return r.json();
-};
-
-const norm = (v: string) => String(v || '').toLowerCase().replace(/[^a-z0-9]/g, '');
 
 type ClickUpTask = {
   id: string;
-  name?: string;
-  parent?: string | null;
+  name: string;
   status?: { status?: string };
+  parent?: string | null;
   list?: { id?: string };
-  subtasks?: ClickUpTask[];
+  date_updated?: string | number | null;
+  custom_fields?: any[];
 };
 
-async function fetchListPage(listId: string, page: number) {
-  const data = await req(
-    `/list/${listId}/task?include_timl=true&include_closed=true&archived=false&subtasks=false&page=${page}`
-  );
-
-  return (data.tasks || []) as ClickUpTask[];
+function token() {
+  if (!process.env.CLICKUP_TOKEN) throw new Error('CLICKUP_TOKEN missing');
+  return process.env.CLICKUP_TOKEN;
 }
 
-async function getRootTasksFromList(listId: string) {
-  const rootTaskMap = new Map<string, ClickUpTask>();
-  const pages: Array<{
-    page: number;
-    apiItems: number;
-    rootItemsOnPage: number;
-    accumulatedRootItems: number;
-    sampleTaskNames: string[];
-  }> = [];
+async function req(path: string, init: RequestInit = {}) {
+  const res = await fetch(`${API}${path}`, {
+    ...init,
+    headers: {
+      Authorization: token(),
+      'Content-Type': 'application/json',
+      ...(init.headers || {}),
+    },
+  });
+  const text = await res.text();
+  if (!res.ok) throw new Error(`ClickUp ${path} failed: ${res.status} ${text}`);
+  return text ? JSON.parse(text) : null;
+}
 
+function norm(s: string) {
+  return (s || '').toLowerCase().trim();
+}
+
+function parseClickUpTimestamp(value: string | number | null | undefined) {
+  if (value === null || value === undefined || value === '') return null;
+  const numeric = typeof value === 'number' ? value : Number(value);
+  if (Number.isFinite(numeric)) return numeric;
+  const parsed = Date.parse(String(value));
+  return Number.isNaN(parsed) ? null : parsed;
+}
+
+function isUpdatedAfter(task: ClickUpTask, updatedAfter: string | null | undefined) {
+  if (!updatedAfter) return true;
+  const baselineMs = Date.parse(updatedAfter);
+  if (Number.isNaN(baselineMs)) return true;
+
+  const taskUpdatedAt = parseClickUpTimestamp(task.date_updated);
+  return taskUpdatedAt === null || taskUpdatedAt > baselineMs;
+}
+
+function customFieldValueMatches(task: ClickUpTask, fieldId: string, optionId: string) {
+  const fields = Array.isArray(task.custom_fields) ? task.custom_fields : [];
+  const field = fields.find((item) => String(item?.id) === String(fieldId));
+  const value = field?.value;
+  if (value === null || value === undefined || value === '') return false;
+
+  const matches = (candidate: any) => {
+    if (candidate === null || candidate === undefined) return false;
+    if (String(candidate) === String(optionId)) return true;
+    if (typeof candidate !== 'object') return false;
+    return [candidate.id, candidate.value, candidate.option_id, candidate.optionId].some(
+      (item) => item !== null && item !== undefined && String(item) === String(optionId),
+    );
+  };
+
+  if (Array.isArray(value)) return value.some(matches);
+  return matches(value);
+}
+
+function createTotals(): Required<SyncTotals> {
+  return { updated: 0, skipped: 0, ignored: 0, errors: 0, details: [] };
+}
+
+function addTotals(target: Required<SyncTotals>, source: SyncTotals, includeDetails = true) {
+  target.updated += source.updated || 0;
+  target.skipped += source.skipped || 0;
+  target.ignored += source.ignored || 0;
+  target.errors += source.errors || 0;
+  if (includeDetails && Array.isArray(source.details)) target.details.push(...source.details);
+}
+
+async function fetchListPage(listId: string, page: number): Promise<ClickUpTask[]> {
+  const data = await req(
+    `/list/${listId}/task?include_timl=true&include_closed=true&archived=false&subtasks=false&page=${page}`,
+  );
+  return data?.tasks || [];
+}
+
+async function getRootTasksFromList(listId: string, updatedAfter?: string | null) {
+  const rootTasks: ClickUpTask[] = [];
   let totalApiItems = 0;
+  let totalRootTasks = 0;
   let page = 0;
 
   while (true) {
-    const pageTasks = await fetchListPage(listId, page);
-    if (!pageTasks.length) break;
+    const tasks = await fetchListPage(listId, page);
+    totalApiItems += tasks.length;
 
-    const rootTasksOnPage = pageTasks.filter((task) => !task.parent);
-    totalApiItems += pageTasks.length;
+    const rootsOnPage = tasks.filter((task) => !task.parent);
+    totalRootTasks += rootsOnPage.length;
+    rootTasks.push(...rootsOnPage.filter((task) => isUpdatedAfter(task, updatedAfter)));
 
-    for (const task of rootTasksOnPage) {
-      rootTaskMap.set(String(task.id), task);
-    }
-
-    pages.push({
-      page,
-      apiItems: pageTasks.length,
-      rootItemsOnPage: rootTasksOnPage.length,
-      accumulatedRootItems: rootTaskMap.size,
-      sampleTaskNames: rootTasksOnPage.slice(0, 10).map((task) => task.name || ''),
-    });
-
-    if (pageTasks.length < PAGE_SIZE) break;
+    if (tasks.length < PAGE_SIZE) break;
     page += 1;
   }
-
-  const rootTasks = [...rootTaskMap.values()].sort((a, b) =>
-    String(a.name || '').localeCompare(String(b.name || ''), 'en', { numeric: true })
-  );
 
   return {
     rootTasks,
     discovery: {
-      listId: String(listId),
-      pagesFetched: pages.length,
+      listId,
+      pagesFetched: page + 1,
       totalApiItems,
-      totalRootTasks: rootTasks.length,
-      pages,
-      rootTasks: rootTasks.map((task) => ({
-        id: String(task.id || ''),
-        name: task.name || '',
-      })),
+      totalRootTasks,
+      candidateRootTasks: rootTasks.length,
+      updatedAfter: updatedAfter || null,
     },
   };
 }
 
-async function getFieldsForList(listId: string, fieldCache?: FieldCache) {
-  const key = String(listId);
-  const cached = fieldCache?.get(key);
-
-  if (cached) return cached;
-
-  const fields = ((await req(`/list/${key}/field`)).fields || []) as any[];
-  fieldCache?.set(key, fields);
+async function getFieldsForList(listId: string, cache?: FieldCache) {
+  if (cache?.has(listId)) return cache.get(listId) || [];
+  const data = await req(`/list/${listId}/field`);
+  const fields = data?.fields || [];
+  cache?.set(listId, fields);
   return fields;
 }
 
-export const getTask = (id: string) => req(`/task/${id}?include_subtasks=true`);
+async function getTask(id: string) {
+  return req(`/task/${id}?include_subtasks=true`);
+}
 
-export async function syncParentTask(id: string, fieldCache?: FieldCache) {
-  const t = (await getTask(id)) as ClickUpTask;
-  const list = t.list?.id;
+export async function discoverUpdatedRootTasks(listIds: string[], updatedAfter?: string | null) {
+  const taskIds: string[] = [];
+  const discovery: any[] = [];
 
-  if (!list) {
-    return {
-      updated: 0,
-      skipped: 0,
-      ignored: 0,
-      errors: 0,
-      details: [{ parentId: id, parentName: t.name || '', action: 'ignored', reason: 'parent_has_no_list' }],
-    };
+  for (const listId of listIds) {
+    const result = await getRootTasksFromList(listId, updatedAfter);
+    discovery.push(result.discovery);
+    taskIds.push(...result.rootTasks.map((task) => task.id));
   }
 
-  const fields = await getFieldsForList(list, fieldCache);
-  const subtasks = (t.subtasks || []).filter((sub) => String(sub.parent || '') === String(id));
+  return { taskIds, discovery };
+}
 
-  let u = 0;
-  let s = 0;
-  let i = 0;
-  let e = 0;
+export async function syncParentTask(id: string, fieldCache?: FieldCache): Promise<SyncTotals> {
+  const parent: ClickUpTask & { subtasks?: ClickUpTask[] } = await getTask(id);
+  const listId = parent.list?.id;
+  if (!listId) return { updated: 0, skipped: 0, ignored: 1, errors: 0, details: [] };
+
+  const fields = await getFieldsForList(listId, fieldCache);
+  const subtasks = parent.subtasks || [];
+  let updated = 0;
+  let skipped = 0;
+  let ignored = 0;
+  let errors = 0;
   const details: any[] = [];
 
   for (const sub of subtasks) {
-    const base = {
-      parentId: String(id),
-      parentName: t.name || '',
-      subtaskId: String(sub.id || ''),
-      subtaskName: sub.name || '',
-      subtaskStatus: sub.status?.status || '',
-      listId: String(list),
-    };
-
-    const f = fields.find((x: any) => norm(x.name) === norm(sub.name || ''));
+    const f = fields.find((x: any) => norm(x.name) === norm(sub.name));
     if (!f) {
-      s++;
-      details.push({ ...base, action: 'skipped', reason: 'field_not_found' });
+      ignored += 1;
+      details.push({ subtaskId: sub.id, subtask: sub.name, reason: 'no_matching_custom_field' });
       continue;
     }
 
-    const options = f.type_config?.options || [];
-    const opt = options.find((o: any) => norm(o.name) === norm(sub.status?.status || ''));
+    const status = sub.status?.status || '';
+    const opts = f.type_config?.options || [];
+    const opt = opts.find((o: any) => norm(o.name) === norm(status));
     if (!opt) {
-      s++;
+      skipped += 1;
       details.push({
-        ...base,
-        action: 'skipped',
-        reason: 'status_option_not_found',
-        fieldId: String(f.id || ''),
-        fieldName: f.name || '',
-        availableOptions: options.map((o: any) => o.name),
+        subtaskId: sub.id,
+        subtask: sub.name,
+        status,
+        field: f.name,
+        reason: 'no_matching_dropdown_option',
+      });
+      continue;
+    }
+
+    if (customFieldValueMatches(parent, f.id, opt.id)) {
+      skipped += 1;
+      details.push({
+        subtaskId: sub.id,
+        subtask: sub.name,
+        status,
+        field: f.name,
+        option: opt.name,
+        reason: 'field_already_set',
       });
       continue;
     }
@@ -172,154 +211,126 @@ export async function syncParentTask(id: string, fieldCache?: FieldCache) {
         method: 'POST',
         body: JSON.stringify({ value: opt.id }),
       });
-      u++;
+      updated += 1;
       details.push({
-        ...base,
-        action: 'updated',
-        fieldId: String(f.id || ''),
-        fieldName: f.name || '',
-        matchedOptionId: String(opt.id || ''),
-        matchedOptionName: opt.name || '',
+        subtaskId: sub.id,
+        subtask: sub.name,
+        status,
+        field: f.name,
+        option: opt.name,
+        action: 'updated_parent_field',
       });
-    } catch (err: any) {
-      e++;
+    } catch (e: any) {
+      errors += 1;
       details.push({
-        ...base,
+        subtaskId: sub.id,
+        subtask: sub.name,
+        status,
+        field: f.name,
+        option: opt.name,
         action: 'error',
-        reason: 'field_update_failed',
-        fieldId: String(f.id || ''),
-        fieldName: f.name || '',
-        matchedOptionId: String(opt.id || ''),
-        matchedOptionName: opt.name || '',
-        error: err instanceof Error ? err.message : String(err || 'unknown_error'),
+        error: e.message,
       });
     }
   }
 
-  if (!details.length) {
-    i++;
-    details.push({
-      parentId: String(id),
-      parentName: t.name || '',
-      action: 'ignored',
-      reason: 'no_first_level_subtasks_found',
-      listId: String(list),
-    });
-  }
-
-  return { updated: u, skipped: s, ignored: i, errors: e, details };
+  return { updated, skipped, ignored, errors, details };
 }
 
-export async function syncLists(ids: string[]) {
-  let u = 0;
-  let s = 0;
-  let i = 0;
-  let e = 0;
-  const details: any[] = [];
-  const discovery: any[] = [];
-  const fieldCache: FieldCache = new Map();
+export async function syncParentTasks(
+  taskIds: string[],
+  options: {
+    fieldCache?: FieldCache;
+    concurrency?: number;
+    includeDetails?: boolean;
+    onProgress?: (processed: number, total: number) => void;
+  } = {},
+) {
+  const totals = createTotals();
+  const fieldCache = options.fieldCache || new Map<string, any[]>();
+  const concurrency = Math.max(1, Math.min(options.concurrency || 4, taskIds.length || 1));
+  const includeDetails = options.includeDetails !== false;
+  let nextIndex = 0;
+  let processed = 0;
 
-  console.log('[syncLists] started', { listCount: ids.length, listIds: ids.map(String) });
-
-  for (const id of ids) {
-    const listId = String(id);
-    const startedAt = Date.now();
-    console.log('[syncLists] list started', { listId });
-
-    const { rootTasks, discovery: listDiscovery } = await getRootTasksFromList(listId);
-    discovery.push(listDiscovery);
-
-    console.log('[syncLists] list discovered', {
-      listId,
-      pagesFetched: listDiscovery.pagesFetched,
-      totalApiItems: listDiscovery.totalApiItems,
-      totalRootTasks: rootTasks.length,
-    });
-
-    if (!rootTasks.length) {
-      details.push({ listId, action: 'ignored', reason: 'no_root_tasks_detected' });
-      continue;
-    }
-
-    await getFieldsForList(listId, fieldCache);
-
-    let processed = 0;
-    for (const rootTask of rootTasks) {
-      const r = await syncParentTask(String(rootTask.id), fieldCache);
-      u += r.updated;
-      s += r.skipped;
-      i += r.ignored;
-      e += r.errors;
-      processed += 1;
-      details.push(...(r.details || []));
-
-      if (processed % 25 === 0) {
-        console.log('[syncLists] list progress', { listId, processed, totalRootTasks: rootTasks.length });
+  async function worker() {
+    while (nextIndex < taskIds.length) {
+      const taskId = taskIds[nextIndex++];
+      try {
+        const result = await syncParentTask(taskId, fieldCache);
+        addTotals(totals, result, includeDetails);
+      } catch (e: any) {
+        totals.errors += 1;
+        if (includeDetails) {
+          totals.details.push({ parentId: taskId, action: 'error', reason: 'sync_parent_failed', error: e.message });
+        }
+      } finally {
+        processed += 1;
+        options.onProgress?.(processed, taskIds.length);
       }
     }
-
-    console.log('[syncLists] list completed', {
-      listId,
-      processed,
-      totalRootTasks: rootTasks.length,
-      elapsedMs: Date.now() - startedAt,
-    });
   }
 
-  console.log('[syncLists] completed', { updated: u, skipped: s, ignored: i, errors: e });
-  return { updated: u, skipped: s, ignored: i, errors: e, details, discovery };
+  await Promise.all(Array.from({ length: concurrency }, worker));
+  return totals;
 }
 
-export function verifyWebhook(body: string, secret: string, sig: string) {
-  const expected = createHmac('sha256', secret).update(body).digest('hex');
-  const received = sig.startsWith('sha256=') ? sig.slice('sha256='.length) : sig;
+export async function syncLists(listIds: string[]) {
+  const fieldCache: FieldCache = new Map();
+  const startedAt = new Date().toISOString();
+  console.log('[syncLists] start', { listIds, startedAt });
 
-  try {
-    return timingSafeEqual(Buffer.from(expected, 'hex'), Buffer.from(received, 'hex'));
-  } catch {
-    return false;
-  }
+  const { taskIds, discovery } = await discoverUpdatedRootTasks(listIds, null);
+  console.log('[syncLists] discovery complete', {
+    listCount: listIds.length,
+    totalRootTasks: taskIds.length,
+    discovery,
+    elapsedMs: Date.now() - Date.parse(startedAt),
+  });
+
+  const result = await syncParentTasks(taskIds, {
+    fieldCache,
+    concurrency: 4,
+    onProgress(processed, total) {
+      if (processed % 25 === 0 || processed === total) {
+        console.log('[syncLists] progress', { processed, total, elapsedMs: Date.now() - Date.parse(startedAt) });
+      }
+    },
+  });
+
+  console.log('[syncLists] complete', {
+    totalParentTasks: taskIds.length,
+    updated: result.updated,
+    skipped: result.skipped,
+    ignored: result.ignored,
+    errors: result.errors,
+    elapsedMs: Date.now() - Date.parse(startedAt),
+  });
+
+  return { ...result, discovery };
+}
+
+export function verifyWebhook(raw: string, signature?: string | null) {
+  const secret = process.env.CLICKUP_WEBHOOK_SECRET;
+  if (!secret) return true;
+  if (!signature) return false;
+  const h = crypto.createHmac('sha256', secret).update(raw).digest('hex');
+  return crypto.timingSafeEqual(Buffer.from(h), Buffer.from(signature));
 }
 
 export async function getLists() {
-  const teams = ((await req('/team')).teams || []) as any[];
+  const teamId = process.env.CLICKUP_TEAM_ID;
+  if (!teamId) throw new Error('CLICKUP_TEAM_ID missing');
+  const spaces = await req(`/team/${teamId}/space?archived=false`);
   const out: any[] = [];
-
-  for (const t of teams) {
-    const spaces = ((await req(`/team/${t.id}/space`)).spaces || []) as any[];
-    for (const s of spaces) {
-      const spaceLists = ((await req(`/space/${s.id}/list`)).lists || []) as any[];
-      for (const l of spaceLists) {
-        out.push({
-          id: String(l.id),
-          name: l.name,
-          spaceId: String(s.id),
-          spaceName: s.name,
-          folderId: null,
-          folderName: 'No folder',
-        });
-      }
-
-      const folders = ((await req(`/space/${s.id}/folder`)).folders || []) as any[];
-      for (const f of folders) {
-        const lists = ((await req(`/folder/${f.id}/list`)).lists || []) as any[];
-        for (const l of lists) {
-          out.push({
-            id: String(l.id),
-            name: l.name,
-            spaceId: String(s.id),
-            spaceName: s.name,
-            folderId: String(f.id),
-            folderName: f.name,
-          });
-        }
-      }
+  for (const sp of spaces.spaces || []) {
+    const folders = await req(`/space/${sp.id}/folder?archived=false`);
+    for (const fo of folders.folders || []) {
+      const lists = await req(`/folder/${fo.id}/list?archived=false`);
+      for (const li of lists.lists || []) out.push({ id: li.id, name: `${sp.name} / ${fo.name} / ${li.name}` });
     }
+    const folderless = await req(`/space/${sp.id}/list?archived=false`);
+    for (const li of folderless.lists || []) out.push({ id: li.id, name: `${sp.name} / ${li.name}` });
   }
-
-  return out.sort((a, b) =>
-    [a.spaceName, a.folderName, a.name]
-      .join('\u0000')
-      .localeCompare([b.spaceName, b.folderName, b.name].join('\u0000'), 'en', { numeric: true })
-  );
+  return out;
 }
