@@ -7,6 +7,8 @@ import ScheduleTimer from './schedule-timer';
 // noop: trigger redeploy v2
 export const dynamic = 'force-dynamic';
 
+const DEFAULT_SYNC_INTERVAL_OPTIONS = [5, 10, 15, 30, 45, 60, 90, 120, 180, 240, 360, 480, 720, 1440];
+
 type ListItem = {
   id: string;
   name: string;
@@ -68,6 +70,7 @@ function Dashboard({
   schedulerReady: boolean;
 }) {
   const selectedLists = lists.filter(l => selectedListIds.includes(l.id));
+  const intervalOptions = [...new Set([...DEFAULT_SYNC_INTERVAL_OPTIONS, syncIntervalMinutes])].sort((a, b) => a - b);
   const groupedLists = lists.reduce<SpaceGroup[]>((groups, list) => {
     const spaceLabel = list.spaceName || 'Unsorted';
     const folderLabel = list.folderName || 'No folder';
@@ -122,7 +125,7 @@ function Dashboard({
           <label style={{ display: 'grid', gap: 6 }}>
             <span>Auto sync interval (minutes)</span>
             <select name="syncIntervalMinutes" defaultValue={String(syncIntervalMinutes)} style={{ padding: 10 }}>
-              {[5, 10, 15, 30, 45, 60, 90, 120, 180, 240, 360, 480, 720, 1440].map((minutes) => (
+              {intervalOptions.map((minutes) => (
                 <option key={minutes} value={minutes}>
                   Every {minutes} minutes
                 </option>
