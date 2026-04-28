@@ -21,6 +21,26 @@ async function getToken(req: NextRequest) {
   }
 }
 
+function isCronRequest(req: NextRequest) {
+  const cronSecret = process.env.CRON_SECRET;
+  const authHeader = req.headers.get('authorization') || '';
+
+  if (cronSecret) {
+    return authHeader === `Bearer ${cronSecret}`;
+  }
+
+  return (req.headers.get('user-agent') || '').includes('vercel-cron/1.0');
+}
+
+export async function GET(req: NextRequest) {
+  if (!isCronRequest(req)) {
+    return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 });
+  }
+
+  const result = await runScheduledSync();
+  return NextResponse.json(result, { status: result.ok ? 200 : 500 });
+}
+
 export async function POST(req: NextRequest) {
   const token = await getToken(req);
 
