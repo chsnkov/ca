@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { saveConfig, appendRun } from '../../../lib/store';
+import { getConfig, saveConfig, appendRun } from '../../../lib/store';
 import { isRequestAuthenticated, unauthorizedRedirect } from '../../../lib/auth';
 import { setupWebhooks } from '../../../lib/webhooks';
 import { normalizeSyncIntervalMinutes } from '../../../lib/scheduler';
@@ -11,7 +11,8 @@ export async function POST(req: NextRequest) {
 
   try {
     const form = await req.formData();
-
+    const currentConfig = await getConfig();
+    const action = String(form.get('configAction') || 'lists');
     const raw = form.getAll('selectedListIds');
     let selectedListIds = [...new Set(raw.map(String).filter(Boolean))];
 
@@ -20,11 +21,36 @@ export async function POST(req: NextRequest) {
       if (single) selectedListIds = [String(single)];
     }
 
+    if (action === 'interval') {
+      const syncIntervalMinutes = normalizeSyncIntervalMinutes(form.get('syncIntervalMinutes'));
+      const existingListIds = Array.isArray(currentConfig?.selectedListIds)
+        ? currentConfig.selectedListIds.map(String).filter(Boolean)
+        : [];
+
+      await saveConfig({
+        ...currentConfig,
+        selectedListIds: existingListIds,
+        syncIntervalMinutes,
+      });
+
+      await appendRun({
+        type: 'config',
+        message: 'SYNC INTERVAL UPDATED',
+        selectedListIds: existingListIds,
+        syncIntervalMinutes,
+        timestamp: Date.now(),
+      });
+
+      return NextResponse.redirect(new URL('/', req.url), { status: 303 });
+    }
+
     if (!selectedListIds.length) {
       return NextResponse.redirect(new URL('/?error=no_list_selected', req.url), { status: 303 });
     }
 
-    const syncIntervalMinutes = normalizeSyncIntervalMinutes(form.get('syncIntervalMinutes'));
+    const syncIntervalMinutes = normalizeSyncIntervalMinutes(
+      form.get('syncIntervalMinutes') ?? currentConfig?.syncIntervalMinutes
+    );
 
     await appendRun({
       type: 'config',
@@ -36,6 +62,7 @@ export async function POST(req: NextRequest) {
     });
 
     await saveConfig({
+      ...currentConfig,
       selectedListIds,
       syncIntervalMinutes,
       managedWebhooks: [],
