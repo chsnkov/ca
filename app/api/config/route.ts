@@ -4,6 +4,11 @@ import { isRequestAuthenticated, unauthorizedRedirect } from '../../../lib/auth'
 import { setupWebhooks } from '../../../lib/webhooks';
 import { normalizeSyncIntervalMinutes } from '../../../lib/scheduler';
 
+function withoutLegacyInterval(config: any) {
+  const { autoSyncIntervalMinutes: _legacyAutoSyncIntervalMinutes, ...rest } = config || {};
+  return rest;
+}
+
 export async function POST(req: NextRequest) {
   if (!isRequestAuthenticated(req)) {
     return unauthorizedRedirect(req);
@@ -12,6 +17,7 @@ export async function POST(req: NextRequest) {
   try {
     const form = await req.formData();
     const currentConfig = await getConfig();
+    const baseConfig = withoutLegacyInterval(currentConfig);
     const action = String(form.get('configAction') || 'lists');
     const raw = form.getAll('selectedListIds');
     let selectedListIds = [...new Set(raw.map(String).filter(Boolean))];
@@ -28,7 +34,7 @@ export async function POST(req: NextRequest) {
         : [];
 
       await saveConfig({
-        ...currentConfig,
+        ...baseConfig,
         selectedListIds: existingListIds,
         syncIntervalMinutes,
       });
@@ -49,7 +55,7 @@ export async function POST(req: NextRequest) {
     }
 
     const syncIntervalMinutes = normalizeSyncIntervalMinutes(
-      form.get('syncIntervalMinutes') ?? currentConfig?.syncIntervalMinutes
+      form.get('syncIntervalMinutes') ?? currentConfig?.syncIntervalMinutes ?? currentConfig?.autoSyncIntervalMinutes
     );
 
     await appendRun({
@@ -62,7 +68,7 @@ export async function POST(req: NextRequest) {
     });
 
     await saveConfig({
-      ...currentConfig,
+      ...baseConfig,
       selectedListIds,
       syncIntervalMinutes,
       managedWebhooks: [],

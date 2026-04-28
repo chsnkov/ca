@@ -39,7 +39,12 @@ export function normalizeSyncIntervalMinutes(value: any) {
 }
 
 function getAutoSyncIntervalMinutes(config: any) {
-  return normalizeAutoSyncIntervalMinutes(config?.autoSyncIntervalMinutes ?? config?.syncIntervalMinutes);
+  return normalizeAutoSyncIntervalMinutes(config?.syncIntervalMinutes ?? config?.autoSyncIntervalMinutes);
+}
+
+function withoutLegacyInterval(config: any) {
+  const { autoSyncIntervalMinutes: _legacyAutoSyncIntervalMinutes, ...rest } = config || {};
+  return rest;
 }
 
 function getLastScheduledRunAt(stats: any) {
@@ -128,7 +133,7 @@ function compactDiscovery(discovery: any[] | undefined) {
 
 async function saveAutoSyncState(state: AutoSyncState) {
   const latestConfig = await getConfig();
-  await saveConfig({ ...latestConfig, autoSync: state });
+  await saveConfig({ ...withoutLegacyInterval(latestConfig), autoSync: state });
 }
 
 function errorMessage(error: any) {
