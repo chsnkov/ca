@@ -335,14 +335,36 @@ export async function getLists() {
   const teamId = await getTeamId();
   const spaces = await req(`/team/${teamId}/space?archived=false`);
   const out: any[] = [];
+
   for (const sp of spaces.spaces || []) {
     const folders = await req(`/space/${sp.id}/folder?archived=false`);
+
     for (const fo of folders.folders || []) {
       const lists = await req(`/folder/${fo.id}/list?archived=false`);
-      for (const li of lists.lists || []) out.push({ id: li.id, name: `${sp.name} / ${fo.name} / ${li.name}` });
+      for (const li of lists.lists || []) {
+        out.push({
+          id: String(li.id),
+          name: li.name,
+          spaceId: String(sp.id),
+          spaceName: sp.name,
+          folderId: String(fo.id),
+          folderName: fo.name,
+        });
+      }
     }
+
     const folderless = await req(`/space/${sp.id}/list?archived=false`);
-    for (const li of folderless.lists || []) out.push({ id: li.id, name: `${sp.name} / ${li.name}` });
+    for (const li of folderless.lists || []) {
+      out.push({
+        id: String(li.id),
+        name: li.name,
+        spaceId: String(sp.id),
+        spaceName: sp.name,
+        folderId: null,
+        folderName: null,
+      });
+    }
   }
+
   return out;
 }
