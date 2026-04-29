@@ -46,6 +46,79 @@ function norm(s: string) {
   return (s || '').toLowerCase().trim();
 }
 
+function normStatus(status: unknown) {
+  return String(status || '').trim().toUpperCase();
+}
+
+const PARENT_STATUS_PLANNED = 'PLANNED';
+const PARENT_STATUS_TO_DO = 'TO DO';
+const PARENT_STATUS_IN_PROGRESS = 'IN PROGRESS';
+const PARENT_STATUS_COMPLETE = 'COMPLETE';
+
+const PARENT_STATUS_WORKING_STATUSES = new Set(['IN PROGRESS', 'FIX', 'TO CHECK']);
+const PARENT_STATUS_TRACKED_STATUSES = new Set([
+  PARENT_STATUS_PLANNED,
+  PARENT_STATUS_TO_DO,
+  PARENT_STATUS_IN_PROGRESS,
+  'FIX',
+  'TO CHECK',
+  PARENT_STATUS_COMPLETE,
+]);
+
+function getParentStatusDecision(subtasks: ClickUpTask[]) {
+  const counts: Record<string, number> = {};
+
+  for (const subtask of subtasks) {
+    const status = normStatus(subtask.status?.status);
+    if (!PARENT_STATUS_TRACKED_STATUSES.has(status)) continue;
+    counts[status] = (counts[status] || 0) + 1;
+  }
+
+  const statuses = Object.keys(counts);
+  if (!statuses.length) {
+    return {
+      desiredStatus: null,
+      reason: 'no_tracked_first_level_subtasks',
+      counts,
+    };
+  }
+
+  if (statuses.some((status) => PARENT_STATUS_WORKING_STATUSES.has(status))) {
+    return {
+      desiredStatus: PARENT_STATUS_IN_PROGRESS,
+      reason: 'working_subtask_status',
+      counts,
+    };
+  }
+
+  if (statuses.length === 1) {
+    const onlyStatus = statuses[0];
+    return {
+      desiredStatus: onlyStatus,
+      reason: `all_${onlyStatus.toLowerCase().replace(/\s+/g, '_')}`,
+      counts,
+    };
+  }
+
+  const onlyPlannedAndToDo = statuses.every((status) =>
+    status === PARENT_STATUS_PLANNED || status === PARENT_STATUS_TO_DO,
+  );
+
+  if (onlyPlannedAndToDo && counts[PARENT_STATUS_TO_DO]) {
+    return {
+      desiredStatus: PARENT_STATUS_TO_DO,
+      reason: 'planned_and_to_do',
+      counts,
+    };
+  }
+
+  return {
+    desiredStatus: PARENT_STATUS_IN_PROGRESS,
+    reason: 'mixed_tracked_statuses',
+    counts,
+  };
+}
+
 function parseClickUpTimestamp(value: string | number | null | undefined) {
   if (value === null || value === undefined || value === '') return null;
   const numeric = typeof value === 'number' ? value : Number(value);
@@ -179,6 +252,93 @@ async function getTeamId() {
 
 export async function getTask(id: string) {
   return req(`/task/${id}?include_subtasks=true`);
+}
+
+async function updateTaskStatus(taskId: string, status: string) {
+  return req(`/task/${taskId}`, {
+    method: 'PUT',
+    body: JSON.stringify({ status }),
+  });
+}
+
+export async function syncParentStatusFromSubtasks(parentId: string) {
+  const parent: ClickUpTask & { subtasks?: ClickUpTask[] } = await getTask(parentId);
+
+  if (parent.parent) {
+    return {
+      updated: 0,
+      skipped: 0,
+      ignored: 1,
+      errors: 0,
+      parentId: String(parentId),
+      parentName: parent.name,
+      reason: 'parent_is_not_root_task',
+    };
+  }
+
+  const firstLevelSubtasks = (parent.subtasks || []).filter((subtask) => String(subtask.parent || '') === String(parentId));
+  const decision = getParentStatusDecision(firstLevelSubtasks);
+
+  if (!decision.desiredStatus) {
+    return {
+      updated: 0,
+      skipped: 0,
+      ignored: 1,
+      errors: 0,
+      parentId: String(parentId),
+      parentName: parent.name,
+      currentStatus: parent.status?.status || '',
+      desiredStatus: null,
+      reason: decision.reason,
+      subtaskStatusCounts: decision.counts,
+    };
+  }
+
+  const currentStatus = parent.status?.status || '';
+  if (normStatus(currentStatus) === decision.desiredStatus) {
+    return {
+      updated: 0,
+      skipped: 1,
+      ignored: 0,
+      errors: 0,
+      parentId: String(parentId),
+      parentName: parent.name,
+      currentStatus,
+      desiredStatus: decision.desiredStatus,
+      reason: 'parent_status_already_set',
+      subtaskStatusCounts: decision.counts,
+    };
+  }
+
+  try {
+    await updateTaskStatus(parentId, decision.desiredStatus);
+    return {
+      updated: 1,
+      skipped: 0,
+      ignored: 0,
+      errors: 0,
+      parentId: String(parentId),
+      parentName: parent.name,
+      previousStatus: currentStatus,
+      desiredStatus: decision.desiredStatus,
+      reason: decision.reason,
+      subtaskStatusCounts: decision.counts,
+    };
+  } catch (error: any) {
+    return {
+      updated: 0,
+      skipped: 0,
+      ignored: 0,
+      errors: 1,
+      parentId: String(parentId),
+      parentName: parent.name,
+      currentStatus,
+      desiredStatus: decision.desiredStatus,
+      reason: 'parent_status_update_failed',
+      error: error?.message || String(error),
+      subtaskStatusCounts: decision.counts,
+    };
+  }
 }
 
 export async function discoverUpdatedRootTasks(listIds: string[], updatedAfter?: string | null) {

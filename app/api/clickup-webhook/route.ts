@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getTask, syncParentTask, verifyWebhook } from '../../../lib/clickup';
+import { getTask, syncParentStatusFromSubtasks, syncParentTask, verifyWebhook } from '../../../lib/clickup';
 import { getConfig, appendRun } from '../../../lib/store';
 
 export async function POST(req: NextRequest) {
@@ -90,6 +90,7 @@ export async function POST(req: NextRequest) {
     const parentId = String(task.parent);
 
     const result = await syncParentTask(parentId);
+    const parentStatusResult = await syncParentStatusFromSubtasks(parentId);
 
     await appendRun({
       type: 'webhook',
@@ -101,6 +102,7 @@ export async function POST(req: NextRequest) {
       status: task.status?.status,
       listId: taskListId,
       result,
+      parentStatusResult,
       timestamp: Date.now(),
     });
 
@@ -108,6 +110,7 @@ export async function POST(req: NextRequest) {
       ok: true,
       parentSynced: parentId,
       result,
+      parentStatusResult,
     });
   } catch (err: any) {
     await appendRun({
