@@ -63,19 +63,47 @@ function isUpdatedAfter(task: ClickUpTask, updatedAfter: string | null | undefin
   return taskUpdatedAt === null || taskUpdatedAt > baselineMs;
 }
 
-function customFieldValueMatches(task: ClickUpTask, fieldId: string, optionId: string) {
+function optionScalarValues(option: any) {
+  return [option?.id, option?.orderindex, option?.orderIndex, option?.index, option?.name]
+    .filter((item) => item !== null && item !== undefined && item !== '')
+    .map(String);
+}
+
+function customFieldValueMatches(task: ClickUpTask, fieldId: string, option: any) {
   const fields = Array.isArray(task.custom_fields) ? task.custom_fields : [];
   const field = fields.find((item) => String(item?.id) === String(fieldId));
   const value = field?.value;
   if (value === null || value === undefined || value === '') return false;
 
-  const matches = (candidate: any) => {
-    if (candidate === null || candidate === undefined) return false;
-    if (String(candidate) === String(optionId)) return true;
-    if (typeof candidate !== 'object') return false;
-    return [candidate.id, candidate.value, candidate.option_id, candidate.optionId].some(
-      (item) => item !== null && item !== undefined && String(item) === String(optionId),
-    );
+  const expectedValues = optionScalarValues(option);
+  const expectedNames = option?.name ? [norm(String(option.name))] : [];
+
+  const matchesScalar = (candidate: any) => {
+    if (candidate === null || candidate === undefined || candidate === '') return false;
+    const text = String(candidate);
+    return expectedValues.includes(text) || expectedNames.includes(norm(text));
+  };
+
+  const matches = (candidate: any): boolean => {
+    if (matchesScalar(candidate)) return true;
+    if (typeof candidate !== 'object' || candidate === null) return false;
+
+    const nestedCandidates = [
+      candidate.id,
+      candidate.value,
+      candidate.option_id,
+      candidate.optionId,
+      candidate.orderindex,
+      candidate.orderIndex,
+      candidate.index,
+      candidate.name,
+      candidate.label,
+    ];
+
+    return nestedCandidates.some((item) => {
+      if (matchesScalar(item)) return true;
+      return typeof item === 'object' && item !== null ? matches(item) : false;
+    });
   };
 
   if (Array.isArray(value)) return value.some(matches);
@@ -202,7 +230,7 @@ export async function syncParentTask(id: string, fieldCache?: FieldCache): Promi
       continue;
     }
 
-    if (customFieldValueMatches(parent, f.id, opt.id)) {
+    if (customFieldValueMatches(parent, f.id, opt)) {
       skipped += 1;
       details.push({
         subtaskId: sub.id,
