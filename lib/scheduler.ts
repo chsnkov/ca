@@ -10,6 +10,9 @@ const AUTO_SYNC_BATCH_SIZE = 20;
 const AUTO_SYNC_TIME_BUDGET_MS = 240_000;
 const AUTO_SYNC_LEASE_MS = 270_000;
 const AUTO_SYNC_CONCURRENCY = 4;
+const TASHKENT_OFFSET_MS = 5 * 60 * 60 * 1000;
+const AUTO_SYNC_QUIET_START_HOUR = 23;
+const AUTO_SYNC_QUIET_END_HOUR = 7;
 
 type AutoSyncState = {
   status: 'running' | 'idle' | 'failed';
@@ -51,6 +54,32 @@ function withoutLegacyInterval(config: any) {
   return rest;
 }
 
+function getTashkentDate(date: Date) {
+  return new Date(date.getTime() + TASHKENT_OFFSET_MS);
+}
+
+function isAutoSyncQuietHours(date = new Date()) {
+  const hour = getTashkentDate(date).getUTCHours();
+  return hour >= AUTO_SYNC_QUIET_START_HOUR || hour < AUTO_SYNC_QUIET_END_HOUR;
+}
+
+function getNextAutoSyncAllowedAt(date = new Date()) {
+  const tashkentDate = getTashkentDate(date);
+  const hour = tashkentDate.getUTCHours();
+  const dayOffset = hour >= AUTO_SYNC_QUIET_START_HOUR ? 1 : 0;
+  const allowedTashkentMs = Date.UTC(
+    tashkentDate.getUTCFullYear(),
+    tashkentDate.getUTCMonth(),
+    tashkentDate.getUTCDate() + dayOffset,
+    AUTO_SYNC_QUIET_END_HOUR,
+    0,
+    0,
+    0,
+  );
+
+  return new Date(allowedTashkentMs - TASHKENT_OFFSET_MS).toISOString();
+}
+
 function getLastScheduledRunAt(stats: any) {
   const runs = Array.isArray(stats?.runs) ? stats.runs : [];
   const lastRun = runs.find((run: any) => run?.type === 'scheduled' && run?.ok === true);
@@ -66,17 +95,47 @@ function getNextScheduledRunAt(lastRunAt: string | null, intervalMinutes: number
   return new Date(Date.parse(lastRunAt) + intervalMinutes * 60_000).toISOString();
 }
 
+function getEffectiveNextScheduledRunAt(rawNextScheduledRunAt: string | null, now: Date) {
+  if (!rawNextScheduledRunAt) {
+    return isAutoSyncQuietHours(now) ? getNextAutoSyncAllowedAt(now) : null;
+  }
+
+  const rawNext = new Date(rawNextScheduledRunAt);
+  if (Number.isNaN(rawNext.getTime())) return rawNextScheduledRunAt;
+
+  if (isAutoSyncQuietHours(rawNext)) {
+    return getNextAutoSyncAllowedAt(rawNext);
+  }
+
+  if (isAutoSyncQuietHours(now)) {
+    const nextAllowed = getNextAutoSyncAllowedAt(now);
+    if (rawNext.getTime() <= Date.parse(nextAllowed)) return nextAllowed;
+  }
+
+  return rawNextScheduledRunAt;
+}
+
 export function getScheduleSummary(config: any, stats: any, now = new Date()) {
   const intervalMinutes = getAutoSyncIntervalMinutes(config);
   const lastScheduledRunAt = getLastScheduledRunAt(stats);
-  const nextScheduledRunAt = getNextScheduledRunAt(lastScheduledRunAt, intervalMinutes);
-  const due = isAutoSyncEnabled(config) && (!nextScheduledRunAt || Date.parse(nextScheduledRunAt) <= now.getTime());
+  const rawNextScheduledRunAt = getNextScheduledRunAt(lastScheduledRunAt, intervalMinutes);
+  const nextScheduledRunAt = getEffectiveNextScheduledRunAt(rawNextScheduledRunAt, now);
+  const autoSyncQuietHoursActive = isAutoSyncQuietHours(now);
+  const dueByInterval = !rawNextScheduledRunAt || Date.parse(rawNextScheduledRunAt) <= now.getTime();
+  const due = isAutoSyncEnabled(config) && !autoSyncQuietHoursActive && dueByInterval;
 
   return {
     intervalMinutes,
     syncIntervalMinutes: intervalMinutes,
     autoSyncEnabled: isAutoSyncEnabled(config),
+    autoSyncQuietHoursActive,
+    autoSyncQuietHours: {
+      timeZone: 'Asia/Tashkent',
+      startHour: AUTO_SYNC_QUIET_START_HOUR,
+      endHour: AUTO_SYNC_QUIET_END_HOUR,
+    },
     lastScheduledRunAt,
+    rawNextScheduledRunAt,
     nextScheduledRunAt,
     due,
   };
@@ -196,6 +255,7 @@ export async function runScheduledSync() {
   console.log('[scheduled] check', {
     intervalMinutes: schedule.intervalMinutes,
     autoSyncEnabled: schedule.autoSyncEnabled,
+    autoSyncQuietHoursActive: schedule.autoSyncQuietHoursActive,
     lastScheduledRunAt: schedule.lastScheduledRunAt,
     nextScheduledRunAt: schedule.nextScheduledRunAt,
     due: schedule.due,
@@ -205,6 +265,11 @@ export async function runScheduledSync() {
   if (!isAutoSyncEnabled(config)) {
     console.log('[scheduled] skipped disabled', schedule);
     return { ok: true, skipped: true, reason: 'auto_sync_disabled', schedule };
+  }
+
+  if (schedule.autoSyncQuietHoursActive) {
+    console.log('[scheduled] skipped quiet_hours', schedule);
+    return { ok: true, skipped: true, reason: 'auto_sync_quiet_hours', schedule };
   }
 
   if (runningState && isLeaseActive(runningState.leaseUntil)) {
