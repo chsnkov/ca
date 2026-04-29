@@ -1,32 +1,42 @@
-import { list, put } from '@vercel/blob';
+import { get, put } from '@vercel/blob';
 
 const STATS_PATH = 'stats.json';
 const CONFIG_PATH = 'config.json';
+const MAX_RUNS = 30;
+const CACHE_TTL_MS = 2000;
+
+const jsonCache = new Map<string, { value: any; expiresAt: number }>();
+
+function getCached(pathname: string) {
+  const cached = jsonCache.get(pathname);
+  if (!cached || Date.now() > cached.expiresAt) return null;
+  return cached.value;
+}
+
+function setCached(pathname: string, value: any) {
+  jsonCache.set(pathname, {
+    value,
+    expiresAt: Date.now() + CACHE_TTL_MS,
+  });
+}
 
 async function fetchBlobJson(pathname: string) {
   if (!process.env.BLOB_READ_WRITE_TOKEN) return null;
 
-  const blobs = await list({
-    prefix: pathname,
+  const cached = getCached(pathname);
+  if (cached) return cached;
+
+  const result = await get(pathname, {
+    access: 'private',
+    useCache: false,
     token: process.env.BLOB_READ_WRITE_TOKEN,
   });
 
-  const blob = blobs.blobs.find((item) => item.pathname === pathname) || blobs.blobs[0];
-  if (!blob) return null;
+  if (!result?.stream) return null;
 
-  const url = blob.downloadUrl || blob.url;
-  const res = await fetch(url, {
-    cache: 'no-store',
-    headers: {
-      Authorization: `Bearer ${process.env.BLOB_READ_WRITE_TOKEN}`,
-    },
-  });
-
-  if (!res.ok) {
-    throw new Error(`Blob read failed: ${res.status} ${res.statusText}`);
-  }
-
-  return res.json();
+  const value = await new Response(result.stream).json();
+  setCached(pathname, value);
+  return value;
 }
 
 export async function getStats() {
@@ -36,9 +46,14 @@ export async function getStats() {
 
 export async function saveStats(stats: any) {
   if (!process.env.BLOB_READ_WRITE_TOKEN) return;
+  const compactStats = {
+    ...stats,
+    runs: Array.isArray(stats?.runs) ? stats.runs.map(compactRun).slice(0, MAX_RUNS) : [],
+  };
+
   await put(
     STATS_PATH,
-    JSON.stringify(stats),
+    JSON.stringify(compactStats),
     {
       access: 'private',
       addRandomSuffix: false,
@@ -46,6 +61,7 @@ export async function saveStats(stats: any) {
       token: process.env.BLOB_READ_WRITE_TOKEN,
     } as any,
   );
+  setCached(STATS_PATH, compactStats);
 }
 
 export async function getConfig() {
@@ -68,10 +84,104 @@ export async function saveConfig(config: any) {
       token: process.env.BLOB_READ_WRITE_TOKEN,
     } as any,
   );
+  setCached(CONFIG_PATH, config);
 }
 
 export async function appendRun(run: any) {
+  await appendRuns([run]);
+}
+
+export async function appendRuns(newRuns: any[]) {
+  if (!newRuns.length) return;
+
   const stats = await getStats();
   const runs = Array.isArray(stats?.runs) ? stats.runs : [];
-  await saveStats({ ...stats, runs: [run, ...runs].slice(0, 50) });
+  await saveStats({
+    ...stats,
+    runs: [...newRuns.map(compactRun), ...runs].slice(0, MAX_RUNS),
+  });
+}
+
+function compactSyncResult(result: any) {
+  if (!result || typeof result !== 'object') return result;
+
+  const compact: any = {};
+  for (const key of [
+    'ok',
+    'updated',
+    'skipped',
+    'ignored',
+    'errors',
+    'partial',
+    'processedRootTasks',
+    'candidateRootTasks',
+    'totalRootTasks',
+  ]) {
+    if (result[key] !== undefined) compact[key] = result[key];
+  }
+
+  if (Array.isArray(result.discovery)) {
+    compact.discovery = result.discovery.map((item: any) => ({
+      listId: item?.listId,
+      pagesFetched: item?.pagesFetched,
+      totalApiItems: item?.totalApiItems,
+      totalRootTasks: item?.totalRootTasks,
+    }));
+  }
+
+  if (Array.isArray(result.details)) {
+    compact.detailsSummary = summarizeDetails(result.details);
+  }
+
+  return Object.keys(compact).length ? compact : result;
+}
+
+function summarizeDetails(details: any[]) {
+  const byAction: Record<string, number> = {};
+  const byReason: Record<string, number> = {};
+
+  for (const detail of details) {
+    const action = detail?.action ? String(detail.action) : 'unknown';
+    byAction[action] = (byAction[action] || 0) + 1;
+
+    if (detail?.reason) {
+      const reason = String(detail.reason);
+      byReason[reason] = (byReason[reason] || 0) + 1;
+    }
+  }
+
+  return {
+    total: details.length,
+    byAction,
+    byReason,
+  };
+}
+
+function compactSetupResult(result: any) {
+  if (!result || typeof result !== 'object') return result;
+
+  return {
+    teamId: result.teamId,
+    endpoint: result.endpoint,
+    selectedListCount: Array.isArray(result.selectedListIds) ? result.selectedListIds.length : undefined,
+    deletedWebhookCount: Array.isArray(result.deletedWebhooks) ? result.deletedWebhooks.length : undefined,
+    createdWebhookCount: Array.isArray(result.createdWebhooks) ? result.createdWebhooks.length : undefined,
+    createdWebhooks: Array.isArray(result.createdWebhooks)
+      ? result.createdWebhooks.map((webhook: any) => ({
+          id: webhook?.id,
+          listId: webhook?.listId,
+          listName: webhook?.listName,
+        }))
+      : undefined,
+  };
+}
+
+function compactRun(run: any) {
+  if (!run || typeof run !== 'object') return run;
+
+  return {
+    ...run,
+    result: compactSyncResult(run.result),
+    setupResult: compactSetupResult(run.setupResult),
+  };
 }
