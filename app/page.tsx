@@ -247,9 +247,6 @@ function Dashboard({
             Auto sync: <strong>{autoSyncEnabled ? `every ${syncIntervalMinutes} minutes` : 'off'}</strong>
           </div>
           <div>
-            Webhook sync: <strong>{webhookSyncEnabled ? 'on' : 'off'}</strong>
-          </div>
-          <div>
             Last auto sync: <strong>{lastScheduledRunAt ? formatTashkentDate(lastScheduledRunAt) : 'never'}</strong>
           </div>
           <div>
