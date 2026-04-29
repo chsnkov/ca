@@ -25,6 +25,7 @@ type AutoSyncState = {
   totals?: Omit<SyncTotals, 'details'> & { processed: number };
   discovery?: any[];
   leaseUntil?: string | null;
+  lastStartedAt?: string;
   lastFinishedAt?: string;
   failedAt?: string;
   error?: string;
@@ -80,14 +81,26 @@ function getNextAutoSyncAllowedAt(date = new Date()) {
   return new Date(allowedTashkentMs - TASHKENT_OFFSET_MS).toISOString();
 }
 
-function getLastScheduledRunAt(stats: any) {
+function normalizeDate(value: any) {
+  if (!value) return null;
+  const time = Date.parse(String(value));
+  return Number.isNaN(time) ? null : new Date(time).toISOString();
+}
+
+function getLastScheduledRunFromStats(stats: any) {
   const runs = Array.isArray(stats?.runs) ? stats.runs : [];
   const lastRun = runs.find((run: any) => run?.type === 'scheduled' && run?.ok === true);
-  const value = lastRun?.startedAt || lastRun?.date || lastRun?.finishedAt || lastRun?.timestamp;
-  if (!value) return null;
+  return normalizeDate(lastRun?.startedAt || lastRun?.date || lastRun?.finishedAt || lastRun?.timestamp);
+}
 
-  const time = Date.parse(value);
-  return Number.isNaN(time) ? null : new Date(time).toISOString();
+function getLastScheduledRunAt(config: any, stats: any) {
+  return (
+    normalizeDate(config?.lastScheduledRunAt) ||
+    normalizeDate(config?.autoSync?.lastStartedAt) ||
+    getLastScheduledRunFromStats(stats) ||
+    normalizeDate(config?.autoSync?.lastFinishedAt) ||
+    normalizeDate(config?.lastScheduledRunFinishedAt)
+  );
 }
 
 function getNextScheduledRunAt(lastRunAt: string | null, intervalMinutes: number) {
@@ -117,7 +130,7 @@ function getEffectiveNextScheduledRunAt(rawNextScheduledRunAt: string | null, no
 
 export function getScheduleSummary(config: any, stats: any, now = new Date()) {
   const intervalMinutes = getAutoSyncIntervalMinutes(config);
-  const lastScheduledRunAt = getLastScheduledRunAt(stats);
+  const lastScheduledRunAt = getLastScheduledRunAt(config, stats);
   const rawNextScheduledRunAt = getNextScheduledRunAt(lastScheduledRunAt, intervalMinutes);
   const nextScheduledRunAt = getEffectiveNextScheduledRunAt(rawNextScheduledRunAt, now);
   const autoSyncQuietHoursActive = isAutoSyncQuietHours(now);
@@ -241,7 +254,7 @@ async function finishWithoutCandidates(state: AutoSyncState, schedule: ReturnTyp
     result,
   });
 
-  await saveAutoSyncState({ status: 'idle', lastFinishedAt: finishedAt });
+  await saveAutoSyncState({ status: 'idle', lastStartedAt: state.startedAt, lastFinishedAt: finishedAt });
   return { ok: true, skipped: true, reason: 'no_updated_tasks', startedAt: state.startedAt, finishedAt, result };
 }
 
@@ -399,7 +412,7 @@ export async function runScheduledSync() {
       result,
     });
 
-    await saveAutoSyncState({ status: 'idle', lastFinishedAt: finishedAt });
+    await saveAutoSyncState({ status: 'idle', lastStartedAt: state.startedAt, lastFinishedAt: finishedAt });
     console.log('[scheduled] complete', { startedAt: state.startedAt, finishedAt, result: { ...result, discovery: compactDiscovery(result.discovery) } });
 
     return { ok: true, startedAt: state.startedAt, finishedAt, result, schedule };
