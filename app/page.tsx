@@ -74,6 +74,7 @@ function Dashboard({
   syncIntervalMinutes,
   autoSyncEnabled,
   webhookSyncEnabled,
+  parentStatusSyncEnabled,
   lastScheduledRunAt,
   nextScheduledRunAt,
   schedulerReady,
@@ -85,6 +86,7 @@ function Dashboard({
   syncIntervalMinutes: number;
   autoSyncEnabled: boolean;
   webhookSyncEnabled: boolean;
+  parentStatusSyncEnabled: boolean;
   lastScheduledRunAt: string | null;
   nextScheduledRunAt: string | null;
   schedulerReady: boolean;
@@ -215,7 +217,9 @@ function Dashboard({
               Auto sync needs ADMIN_TOKEN in Vercel production env.
             </div>
           )}
-          <form method="post" action="/api/config" style={{ display: 'flex', gap: 14, alignItems: 'center', flexWrap: 'wrap' }}>
+          <div style={{ border: '1px solid #1f2937', borderRadius: 8, padding: 12, display: 'grid', gap: 10 }}>
+            <h3 style={{ margin: 0, fontSize: 16 }}>Automation Toggles</h3>
+            <form method="post" action="/api/config" style={{ display: 'flex', gap: 14, alignItems: 'center', flexWrap: 'wrap' }}>
             <input type="hidden" name="configAction" value="syncToggles" />
             <label style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
               <input name="autoSyncEnabled" type="checkbox" defaultChecked={autoSyncEnabled} />
@@ -225,8 +229,13 @@ function Dashboard({
               <input name="webhookSyncEnabled" type="checkbox" defaultChecked={webhookSyncEnabled} />
               <span>Webhook sync</span>
             </label>
+            <label style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+              <input name="parentStatusSyncEnabled" type="checkbox" defaultChecked={parentStatusSyncEnabled} />
+              <span>Parent status sync</span>
+            </label>
             <button type="submit">Save Sync Toggles</button>
-          </form>
+            </form>
+          </div>
           <form method="post" action="/api/config" style={{ display: 'flex', gap: 8, alignItems: 'end', flexWrap: 'wrap' }}>
             <input type="hidden" name="configAction" value="interval" />
             <label style={{ display: 'grid', gap: 6 }}>
@@ -309,6 +318,7 @@ export default async function Page(props: { searchParams?: Promise<{ error?: str
   const selectedListIds = config?.selectedListIds || [];
   const autoSyncEnabled = config?.autoSyncEnabled !== false;
   const webhookSyncEnabled = config?.webhookSyncEnabled !== false;
+  const parentStatusSyncEnabled = config?.parentStatusSyncEnabled !== false;
   const schedule = getScheduleSummary(config, stats);
 
   return (
@@ -320,6 +330,7 @@ export default async function Page(props: { searchParams?: Promise<{ error?: str
       syncIntervalMinutes={schedule.syncIntervalMinutes}
       autoSyncEnabled={autoSyncEnabled}
       webhookSyncEnabled={webhookSyncEnabled}
+      parentStatusSyncEnabled={parentStatusSyncEnabled}
       lastScheduledRunAt={schedule.lastScheduledRunAt}
       nextScheduledRunAt={schedule.nextScheduledRunAt}
       schedulerReady={Boolean(process.env.ADMIN_TOKEN)}

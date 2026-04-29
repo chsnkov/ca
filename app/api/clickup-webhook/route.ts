@@ -90,7 +90,16 @@ export async function POST(req: NextRequest) {
     const parentId = String(task.parent);
 
     const result = await syncParentTask(parentId);
-    const parentStatusResult = await syncParentStatusFromSubtasks(parentId);
+    const parentStatusResult = config?.parentStatusSyncEnabled === false
+      ? {
+          updated: 0,
+          skipped: 0,
+          ignored: 1,
+          errors: 0,
+          parentId,
+          reason: 'parent_status_sync_disabled',
+        }
+      : await syncParentStatusFromSubtasks(parentId);
 
     await appendRun({
       type: 'webhook',

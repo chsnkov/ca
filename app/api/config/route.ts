@@ -34,6 +34,7 @@ export async function POST(req: NextRequest) {
     if (action === 'syncToggles') {
       const autoSyncEnabled = isChecked(form.get('autoSyncEnabled'));
       const webhookSyncEnabled = isChecked(form.get('webhookSyncEnabled'));
+      const parentStatusSyncEnabled = isChecked(form.get('parentStatusSyncEnabled'));
       const wasWebhookSyncEnabled = currentConfig?.webhookSyncEnabled !== false;
       const existingListIds = Array.isArray(currentConfig?.selectedListIds)
         ? currentConfig.selectedListIds.map(String).filter(Boolean)
@@ -47,6 +48,7 @@ export async function POST(req: NextRequest) {
         syncIntervalMinutes,
         autoSyncEnabled,
         webhookSyncEnabled,
+        parentStatusSyncEnabled,
         autoSync: autoSyncEnabled
           ? baseConfig.autoSync
           : { status: 'idle', disabledAt: new Date().toISOString() },
@@ -64,6 +66,7 @@ export async function POST(req: NextRequest) {
             syncIntervalMinutes,
             autoSyncEnabled,
             webhookSyncEnabled,
+            parentStatusSyncEnabled,
             setupResult,
             timestamp: Date.now(),
           });
@@ -82,6 +85,7 @@ export async function POST(req: NextRequest) {
             syncIntervalMinutes,
             autoSyncEnabled,
             webhookSyncEnabled: false,
+            parentStatusSyncEnabled,
             timestamp: Date.now(),
           });
         }
@@ -96,6 +100,7 @@ export async function POST(req: NextRequest) {
         syncIntervalMinutes,
         autoSyncEnabled,
         webhookSyncEnabled,
+        parentStatusSyncEnabled,
         timestamp: Date.now(),
       });
 
