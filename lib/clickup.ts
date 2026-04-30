@@ -25,6 +25,12 @@ type ClickUpTask = {
   custom_fields?: any[];
 };
 
+type FullSyncOptions = {
+  includeCustomFieldSync?: boolean;
+  includeParentStatusSync?: boolean;
+  includeDateStatusSync?: boolean;
+};
+
 function token() {
   if (!process.env.CLICKUP_TOKEN) throw new Error('CLICKUP_TOKEN missing');
   return process.env.CLICKUP_TOKEN;
@@ -248,9 +254,9 @@ function addTotals(target: Required<SyncTotals>, source: SyncTotals, includeDeta
   if (includeDetails && Array.isArray(source.details)) target.details.push(...source.details);
 }
 
-async function fetchListPage(listId: string, page: number): Promise<ClickUpTask[]> {
+async function fetchListPage(listId: string, page: number, includeSubtasks = false): Promise<ClickUpTask[]> {
   const data = await req(
-    `/list/${listId}/task?include_timl=true&include_closed=true&archived=false&subtasks=false&page=${page}`,
+    `/list/${listId}/task?include_timl=true&include_closed=true&archived=false&subtasks=${includeSubtasks ? 'true' : 'false'}&page=${page}`,
   );
   return data?.tasks || [];
 }
@@ -394,6 +400,31 @@ export async function syncParentStatusFromSubtasks(parentId: string) {
   }
 }
 
+async function getSubtasksFromList(listId: string) {
+  const subtasks: ClickUpTask[] = [];
+  let totalApiItems = 0;
+  let page = 0;
+
+  while (true) {
+    const tasks = await fetchListPage(listId, page, true);
+    totalApiItems += tasks.length;
+    subtasks.push(...tasks.filter((task) => task.parent));
+
+    if (tasks.length < PAGE_SIZE) break;
+    page += 1;
+  }
+
+  return {
+    subtasks,
+    discovery: {
+      listId,
+      pagesFetched: page + 1,
+      totalApiItems,
+      candidateSubtasks: subtasks.length,
+    },
+  };
+}
+
 export async function syncTaskStatusFromDates(task: ClickUpTask) {
   const taskId = String(task.id);
   const currentStatus = task.status?.status || '';
@@ -506,6 +537,19 @@ export async function discoverUpdatedRootTasks(listIds: string[], updatedAfter?:
   return { taskIds, discovery };
 }
 
+async function discoverSubtasks(listIds: string[]) {
+  const tasks: ClickUpTask[] = [];
+  const discovery: any[] = [];
+
+  for (const listId of listIds) {
+    const result = await getSubtasksFromList(listId);
+    discovery.push(result.discovery);
+    tasks.push(...result.subtasks);
+  }
+
+  return { tasks, discovery };
+}
+
 export async function syncParentTask(id: string, fieldCache?: FieldCache): Promise<SyncTotals> {
   const parent: ClickUpTask & { subtasks?: ClickUpTask[] } = await getTask(id);
   const listId = parent.list?.id;
@@ -592,13 +636,19 @@ export async function syncParentTasks(
     fieldCache?: FieldCache;
     concurrency?: number;
     includeDetails?: boolean;
+    includeCustomFieldSync?: boolean;
+    includeParentStatusSync?: boolean;
     onProgress?: (processed: number, total: number) => void;
   } = {},
 ) {
   const totals = createTotals();
+  const customFieldTotals = createTotals();
+  const parentStatusTotals = createTotals();
   const fieldCache = options.fieldCache || new Map<string, any[]>();
   const concurrency = Math.max(1, Math.min(options.concurrency || 4, taskIds.length || 1));
   const includeDetails = options.includeDetails !== false;
+  const includeCustomFieldSync = options.includeCustomFieldSync !== false;
+  const includeParentStatusSync = options.includeParentStatusSync === true;
   let nextIndex = 0;
   let processed = 0;
 
@@ -606,8 +656,19 @@ export async function syncParentTasks(
     while (nextIndex < taskIds.length) {
       const taskId = taskIds[nextIndex++];
       try {
-        const result = await syncParentTask(taskId, fieldCache);
-        addTotals(totals, result, includeDetails);
+        if (includeCustomFieldSync) {
+          const result = await syncParentTask(taskId, fieldCache);
+          addTotals(customFieldTotals, result, includeDetails);
+        } else {
+          customFieldTotals.ignored += 1;
+        }
+
+        if (includeParentStatusSync) {
+          const parentStatusResult = await syncParentStatusFromSubtasks(taskId);
+          addTotals(parentStatusTotals, parentStatusResult, includeDetails);
+        } else {
+          parentStatusTotals.ignored += 1;
+        }
       } catch (e: any) {
         totals.errors += 1;
         if (includeDetails) {
@@ -621,31 +682,111 @@ export async function syncParentTasks(
   }
 
   await Promise.all(Array.from({ length: concurrency }, worker));
+  addTotals(totals, customFieldTotals, includeDetails);
+  return {
+    ...totals,
+    customFieldResult: customFieldTotals,
+    parentStatusResult: parentStatusTotals,
+  };
+}
+
+export async function syncDateStatusForTasks(
+  tasks: ClickUpTask[],
+  options: {
+    concurrency?: number;
+    includeDetails?: boolean;
+    onProgress?: (processed: number, total: number) => void;
+  } = {},
+) {
+  const totals = createTotals();
+  const concurrency = Math.max(1, Math.min(options.concurrency || 4, tasks.length || 1));
+  const includeDetails = options.includeDetails !== false;
+  let nextIndex = 0;
+  let processed = 0;
+
+  async function worker() {
+    while (nextIndex < tasks.length) {
+      const task = tasks[nextIndex++];
+      try {
+        const result = await syncTaskStatusFromDates(task);
+        addTotals(totals, result, false);
+        if (includeDetails) totals.details.push(result);
+      } catch (e: any) {
+        totals.errors += 1;
+        if (includeDetails) {
+          totals.details.push({ taskId: task.id, action: 'error', reason: 'date_status_sync_failed', error: e.message });
+        }
+      } finally {
+        processed += 1;
+        options.onProgress?.(processed, tasks.length);
+      }
+    }
+  }
+
+  await Promise.all(Array.from({ length: concurrency }, worker));
   return totals;
 }
 
-export async function syncLists(listIds: string[]) {
+export async function syncLists(listIds: string[], options: FullSyncOptions = {}) {
   const fieldCache: FieldCache = new Map();
   const startedAt = new Date().toISOString();
-  console.log('[syncLists] start', { listIds, startedAt });
+  const includeCustomFieldSync = options.includeCustomFieldSync !== false;
+  const includeParentStatusSync = options.includeParentStatusSync === true;
+  const includeDateStatusSync = options.includeDateStatusSync === true;
+  console.log('[syncLists] start', { listIds, startedAt, includeCustomFieldSync, includeParentStatusSync, includeDateStatusSync });
 
-  const { taskIds, discovery } = await discoverUpdatedRootTasks(listIds, null);
-  console.log('[syncLists] discovery complete', {
-    listCount: listIds.length,
-    totalRootTasks: taskIds.length,
-    discovery,
-    elapsedMs: Date.now() - Date.parse(startedAt),
-  });
+  let taskIds: string[] = [];
+  let discovery: any[] = [];
+  let result: Awaited<ReturnType<typeof syncParentTasks>> = {
+    ...createTotals(),
+    customFieldResult: createTotals(),
+    parentStatusResult: createTotals(),
+  };
+  let dateStatusResult: Required<SyncTotals> | null = null;
+  let dateStatusDiscovery: any[] = [];
 
-  const result = await syncParentTasks(taskIds, {
-    fieldCache,
-    concurrency: 4,
-    onProgress(processed, total) {
-      if (processed % 25 === 0 || processed === total) {
-        console.log('[syncLists] progress', { processed, total, elapsedMs: Date.now() - Date.parse(startedAt) });
-      }
-    },
-  });
+  if (includeDateStatusSync) {
+    const subtaskDiscovery = await discoverSubtasks(listIds);
+    dateStatusDiscovery = subtaskDiscovery.discovery;
+    console.log('[syncLists] date status discovery complete', {
+      totalSubtasks: subtaskDiscovery.tasks.length,
+      discovery: dateStatusDiscovery,
+      elapsedMs: Date.now() - Date.parse(startedAt),
+    });
+
+    dateStatusResult = await syncDateStatusForTasks(subtaskDiscovery.tasks, {
+      concurrency: 4,
+      onProgress(processed, total) {
+        if (processed % 25 === 0 || processed === total) {
+          console.log('[syncLists] date status progress', { processed, total, elapsedMs: Date.now() - Date.parse(startedAt) });
+        }
+      },
+    });
+  }
+
+  if (includeCustomFieldSync || includeParentStatusSync) {
+    const rootDiscovery = await discoverUpdatedRootTasks(listIds, null);
+    taskIds = rootDiscovery.taskIds;
+    discovery = rootDiscovery.discovery;
+    console.log('[syncLists] discovery complete', {
+      listCount: listIds.length,
+      totalRootTasks: taskIds.length,
+      discovery,
+      elapsedMs: Date.now() - Date.parse(startedAt),
+    });
+
+    result = await syncParentTasks(taskIds, {
+      fieldCache,
+      concurrency: 4,
+      includeCustomFieldSync,
+      includeParentStatusSync,
+      onProgress(processed, total) {
+        if (processed % 25 === 0 || processed === total) {
+          console.log('[syncLists] progress', { processed, total, elapsedMs: Date.now() - Date.parse(startedAt) });
+        }
+      },
+    });
+  }
 
   console.log('[syncLists] complete', {
     totalParentTasks: taskIds.length,
@@ -653,10 +794,22 @@ export async function syncLists(listIds: string[]) {
     skipped: result.skipped,
     ignored: result.ignored,
     errors: result.errors,
+    parentStatusResult: result.parentStatusResult,
+    dateStatusResult,
     elapsedMs: Date.now() - Date.parse(startedAt),
   });
 
-  return { ...result, discovery };
+  return {
+    ...result,
+    discovery,
+    options: {
+      includeCustomFieldSync,
+      includeParentStatusSync,
+      includeDateStatusSync,
+    },
+    dateStatusResult,
+    dateStatusDiscovery,
+  };
 }
 
 export function verifyWebhook(raw: string, secretOrSignature?: string | null, signatureMaybe?: string | null) {

@@ -42,7 +42,11 @@ export async function POST(req: NextRequest) {
       return NextResponse.redirect(new URL('/?error=no_list_configured', req.url), { status: 303 });
     }
 
-    const result = await syncLists(listIds);
+    const result = await syncLists(listIds, {
+      includeCustomFieldSync: config?.autoSyncEnabled !== false,
+      includeParentStatusSync: config?.parentStatusSyncEnabled !== false,
+      includeDateStatusSync: config?.dateStatusSyncEnabled !== false,
+    });
 
     try {
       await appendRun({

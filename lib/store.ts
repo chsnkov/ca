@@ -129,6 +129,21 @@ function compactSyncResult(result: any) {
     }));
   }
 
+  if (Array.isArray(result.dateStatusDiscovery)) {
+    compact.dateStatusDiscovery = result.dateStatusDiscovery.map((item: any) => ({
+      listId: item?.listId,
+      pagesFetched: item?.pagesFetched,
+      totalApiItems: item?.totalApiItems,
+      candidateSubtasks: item?.candidateSubtasks,
+    }));
+  }
+
+  for (const key of ['customFieldResult', 'parentStatusResult', 'dateStatusResult']) {
+    if (result[key]) compact[key] = compactSyncResult(result[key]);
+  }
+
+  if (result.options) compact.options = result.options;
+
   if (Array.isArray(result.details)) {
     compact.detailsSummary = summarizeDetails(result.details);
   }
