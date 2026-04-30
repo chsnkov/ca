@@ -56,6 +56,7 @@ const PARENT_STATUS_PLANNED = 'PLANNED';
 const PARENT_STATUS_TO_DO = 'TO DO';
 const PARENT_STATUS_IN_PROGRESS = 'IN PROGRESS';
 const PARENT_STATUS_COMPLETE = 'COMPLETE';
+const PARENT_STATUS_PAUSED = 'PAUSED';
 
 const PARENT_STATUS_WORKING_STATUSES = new Set(['IN PROGRESS', 'FIX', 'TO CHECK']);
 const PARENT_STATUS_TRACKED_STATUSES = new Set([
@@ -98,6 +99,23 @@ function getParentStatusDecision(subtasks: ClickUpTask[]) {
     return {
       desiredStatus: PARENT_STATUS_IN_PROGRESS,
       reason: 'working_subtask_status',
+      counts,
+    };
+  }
+
+  const onlyPlannedToDoAndComplete = statuses.every((status) =>
+    status === PARENT_STATUS_PLANNED ||
+    status === PARENT_STATUS_TO_DO ||
+    status === PARENT_STATUS_COMPLETE,
+  );
+  const hasCompleteWithPendingStatus = counts[PARENT_STATUS_COMPLETE] && (
+    counts[PARENT_STATUS_PLANNED] || counts[PARENT_STATUS_TO_DO]
+  );
+
+  if (onlyPlannedToDoAndComplete && hasCompleteWithPendingStatus) {
+    return {
+      desiredStatus: PARENT_STATUS_PAUSED,
+      reason: 'complete_with_planned_or_to_do',
       counts,
     };
   }
