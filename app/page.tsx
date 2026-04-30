@@ -75,6 +75,7 @@ function Dashboard({
   autoSyncEnabled,
   webhookSyncEnabled,
   parentStatusSyncEnabled,
+  dateStatusSyncEnabled,
   lastScheduledRunAt,
   nextScheduledRunAt,
   schedulerReady,
@@ -87,6 +88,7 @@ function Dashboard({
   autoSyncEnabled: boolean;
   webhookSyncEnabled: boolean;
   parentStatusSyncEnabled: boolean;
+  dateStatusSyncEnabled: boolean;
   lastScheduledRunAt: string | null;
   nextScheduledRunAt: string | null;
   schedulerReady: boolean;
@@ -233,6 +235,10 @@ function Dashboard({
               <input name="parentStatusSyncEnabled" type="checkbox" defaultChecked={parentStatusSyncEnabled} />
               <span>Parent status sync</span>
             </label>
+            <label style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+              <input name="dateStatusSyncEnabled" type="checkbox" defaultChecked={dateStatusSyncEnabled} />
+              <span>Date status sync</span>
+            </label>
             <button type="submit">Save Sync Toggles</button>
             </form>
           </div>
@@ -319,6 +325,7 @@ export default async function Page(props: { searchParams?: Promise<{ error?: str
   const autoSyncEnabled = config?.autoSyncEnabled !== false;
   const webhookSyncEnabled = config?.webhookSyncEnabled !== false;
   const parentStatusSyncEnabled = config?.parentStatusSyncEnabled !== false;
+  const dateStatusSyncEnabled = config?.dateStatusSyncEnabled !== false;
   const schedule = getScheduleSummary(config, stats);
 
   return (
@@ -331,6 +338,7 @@ export default async function Page(props: { searchParams?: Promise<{ error?: str
       autoSyncEnabled={autoSyncEnabled}
       webhookSyncEnabled={webhookSyncEnabled}
       parentStatusSyncEnabled={parentStatusSyncEnabled}
+      dateStatusSyncEnabled={dateStatusSyncEnabled}
       lastScheduledRunAt={schedule.lastScheduledRunAt}
       nextScheduledRunAt={schedule.nextScheduledRunAt}
       schedulerReady={Boolean(process.env.ADMIN_TOKEN)}

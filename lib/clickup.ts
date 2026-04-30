@@ -19,6 +19,8 @@ type ClickUpTask = {
   status?: { status?: string };
   parent?: string | null;
   list?: { id?: string };
+  start_date?: string | number | null;
+  due_date?: string | number | null;
   date_updated?: string | number | null;
   custom_fields?: any[];
 };
@@ -63,6 +65,15 @@ const PARENT_STATUS_TRACKED_STATUSES = new Set([
   'FIX',
   'TO CHECK',
   PARENT_STATUS_COMPLETE,
+]);
+
+const DATE_STATUS_IGNORED_STATUSES = new Set([
+  PARENT_STATUS_IN_PROGRESS,
+  'FIX',
+  'TO CHECK',
+  PARENT_STATUS_COMPLETE,
+  'CANCELED',
+  'NO NEED',
 ]);
 
 function getParentStatusDecision(subtasks: ClickUpTask[]) {
@@ -117,6 +128,10 @@ function getParentStatusDecision(subtasks: ClickUpTask[]) {
     reason: 'mixed_tracked_statuses',
     counts,
   };
+}
+
+function hasClickUpDate(value: unknown) {
+  return value !== null && value !== undefined && value !== '';
 }
 
 function parseClickUpTimestamp(value: string | number | null | undefined) {
@@ -337,6 +352,105 @@ export async function syncParentStatusFromSubtasks(parentId: string) {
       reason: 'parent_status_update_failed',
       error: error?.message || String(error),
       subtaskStatusCounts: decision.counts,
+    };
+  }
+}
+
+export async function syncTaskStatusFromDates(task: ClickUpTask) {
+  const taskId = String(task.id);
+  const currentStatus = task.status?.status || '';
+  const normalizedStatus = normStatus(currentStatus);
+  const hasStartDate = hasClickUpDate(task.start_date);
+  const hasDueDate = hasClickUpDate(task.due_date);
+  const desiredStatus = hasStartDate && hasDueDate ? PARENT_STATUS_TO_DO : PARENT_STATUS_PLANNED;
+
+  if (!task.parent) {
+    return {
+      updated: 0,
+      skipped: 0,
+      ignored: 1,
+      errors: 0,
+      taskId,
+      from: currentStatus,
+      to: null,
+      hasStartDate,
+      hasDueDate,
+      reason: 'task_is_not_subtask',
+    };
+  }
+
+  if (DATE_STATUS_IGNORED_STATUSES.has(normalizedStatus)) {
+    return {
+      updated: 0,
+      skipped: 0,
+      ignored: 1,
+      errors: 0,
+      taskId,
+      from: currentStatus,
+      to: null,
+      hasStartDate,
+      hasDueDate,
+      reason: 'status_ignored',
+    };
+  }
+
+  if (normalizedStatus !== PARENT_STATUS_PLANNED && normalizedStatus !== PARENT_STATUS_TO_DO) {
+    return {
+      updated: 0,
+      skipped: 0,
+      ignored: 1,
+      errors: 0,
+      taskId,
+      from: currentStatus,
+      to: null,
+      hasStartDate,
+      hasDueDate,
+      reason: 'unknown_status_ignored',
+    };
+  }
+
+  if (normalizedStatus === desiredStatus) {
+    return {
+      updated: 0,
+      skipped: 1,
+      ignored: 0,
+      errors: 0,
+      taskId,
+      from: currentStatus,
+      to: desiredStatus,
+      hasStartDate,
+      hasDueDate,
+      reason: 'status_already_matches_dates',
+    };
+  }
+
+  try {
+    await updateTaskStatus(taskId, desiredStatus);
+    return {
+      updated: 1,
+      skipped: 0,
+      ignored: 0,
+      errors: 0,
+      taskId,
+      from: currentStatus,
+      to: desiredStatus,
+      hasStartDate,
+      hasDueDate,
+      reason: hasStartDate && hasDueDate ? 'both_dates_present' : 'missing_required_dates',
+    };
+  } catch (error: any) {
+    return {
+      updated: 0,
+      skipped: 0,
+      ignored: 0,
+      errors: 1,
+      taskId,
+      from: currentStatus,
+      to: desiredStatus,
+      hasStartDate,
+      hasDueDate,
+      reason: 'date_status_update_failed',
+      error: error?.message || String(error),
     };
   }
 }

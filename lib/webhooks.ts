@@ -1,6 +1,7 @@
 import { getConfig, saveConfig } from './store';
 
 const API = 'https://api.clickup.com/api/v2';
+const WEBHOOK_EVENTS = ['taskStatusUpdated', 'taskUpdated'];
 
 async function clickupReq(path: string, init?: RequestInit) {
   const res = await fetch(API + path, {
@@ -49,7 +50,7 @@ export async function setupWebhooks(origin: string, listIds?: string[], configPa
   const existing = await clickupReq(`/team/${teamId}/webhook`);
   const webhooks = existing?.webhooks || [];
   const deletedWebhooks: string[] = [];
-  const createdWebhooks: Array<{ id?: string; listId: string; listName: string | null; endpoint: string }> = [];
+  const createdWebhooks: Array<{ id?: string; listId: string; listName: string | null; endpoint: string; events: string[] }> = [];
 
   for (const wh of webhooks) {
     if (wh.endpoint === endpoint) {
@@ -62,7 +63,7 @@ export async function setupWebhooks(origin: string, listIds?: string[], configPa
     const listName = await getListName(listId);
     const payload: Record<string, unknown> = {
       endpoint,
-      events: ['taskStatusUpdated'],
+      events: WEBHOOK_EVENTS,
       list_id: listId,
     };
 
@@ -80,6 +81,7 @@ export async function setupWebhooks(origin: string, listIds?: string[], configPa
       listId: String(listId),
       listName,
       endpoint,
+      events: WEBHOOK_EVENTS,
     });
   }
 

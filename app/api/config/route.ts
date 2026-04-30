@@ -35,7 +35,7 @@ export async function POST(req: NextRequest) {
       const autoSyncEnabled = isChecked(form.get('autoSyncEnabled'));
       const webhookSyncEnabled = isChecked(form.get('webhookSyncEnabled'));
       const parentStatusSyncEnabled = isChecked(form.get('parentStatusSyncEnabled'));
-      const wasWebhookSyncEnabled = currentConfig?.webhookSyncEnabled !== false;
+      const dateStatusSyncEnabled = isChecked(form.get('dateStatusSyncEnabled'));
       const existingListIds = Array.isArray(currentConfig?.selectedListIds)
         ? currentConfig.selectedListIds.map(String).filter(Boolean)
         : [];
@@ -49,24 +49,26 @@ export async function POST(req: NextRequest) {
         autoSyncEnabled,
         webhookSyncEnabled,
         parentStatusSyncEnabled,
+        dateStatusSyncEnabled,
         autoSync: autoSyncEnabled
           ? baseConfig.autoSync
           : { status: 'idle', disabledAt: new Date().toISOString() },
       };
 
-      if (webhookSyncEnabled && !wasWebhookSyncEnabled) {
+      if (webhookSyncEnabled && existingListIds.length) {
         try {
           const setupResult = await setupWebhooks(req.nextUrl.origin, existingListIds, nextConfig);
 
           await appendRun({
             type: 'config',
             message: 'WEBHOOK SETUP OK',
-            reason: 'webhook_sync_enabled',
+            reason: 'sync_toggles_saved',
             selectedListIds: existingListIds,
             syncIntervalMinutes,
             autoSyncEnabled,
             webhookSyncEnabled,
             parentStatusSyncEnabled,
+            dateStatusSyncEnabled,
             setupResult,
             timestamp: Date.now(),
           });
@@ -86,6 +88,7 @@ export async function POST(req: NextRequest) {
             autoSyncEnabled,
             webhookSyncEnabled: false,
             parentStatusSyncEnabled,
+            dateStatusSyncEnabled,
             timestamp: Date.now(),
           });
         }
@@ -101,6 +104,7 @@ export async function POST(req: NextRequest) {
         autoSyncEnabled,
         webhookSyncEnabled,
         parentStatusSyncEnabled,
+        dateStatusSyncEnabled,
         timestamp: Date.now(),
       });
 

@@ -1,6 +1,22 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getTask, syncParentStatusFromSubtasks, syncParentTask, verifyWebhook } from '../../../lib/clickup';
+import {
+  getTask,
+  syncParentStatusFromSubtasks,
+  syncParentTask,
+  syncTaskStatusFromDates,
+  verifyWebhook,
+} from '../../../lib/clickup';
 import { getConfig, appendRun } from '../../../lib/store';
+
+function isDateRelevantTaskUpdate(body: any) {
+  if (body?.event !== 'taskUpdated') return false;
+  const items = Array.isArray(body?.history_items) ? body.history_items : [];
+
+  return items.some((item: any) => {
+    const field = String(item?.field || item?.field_name || item?.custom_field?.name || '').trim().toLowerCase();
+    return field === 'start_date' || field === 'due_date';
+  });
+}
 
 export async function POST(req: NextRequest) {
   try {
@@ -27,6 +43,7 @@ export async function POST(req: NextRequest) {
 
     const event = body.event;
     const taskId = body.task_id;
+    const isDateUpdateEvent = isDateRelevantTaskUpdate(body);
 
     if (config?.webhookSyncEnabled === false) {
       await appendRun({
@@ -41,7 +58,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: true, ignored: 'webhook_sync_disabled' });
     }
 
-    if (event !== 'taskStatusUpdated') {
+    if (event !== 'taskStatusUpdated' && !isDateUpdateEvent) {
       return NextResponse.json({ ok: true, ignored: true });
     }
 
@@ -70,6 +87,22 @@ export async function POST(req: NextRequest) {
     }
 
     if (!task.parent) {
+      if (isDateUpdateEvent) {
+        await appendRun({
+          type: 'webhook',
+          message: 'DATE STATUS SYNC: ignored root task',
+          action: 'date_status_ignored_root_task',
+          event,
+          taskId,
+          taskListId,
+          taskName: task.name,
+          status: task.status?.status,
+          timestamp: Date.now(),
+        });
+
+        return NextResponse.json({ ok: true, ignored: 'root_task_date_update' });
+      }
+
       const result = await syncParentTask(String(task.id));
 
       await appendRun({
@@ -88,28 +121,70 @@ export async function POST(req: NextRequest) {
     }
 
     const parentId = String(task.parent);
-
-    const result = await syncParentTask(parentId);
-    const parentStatusResult = config?.parentStatusSyncEnabled === false
+    const dateStatusResult = config?.dateStatusSyncEnabled === false
       ? {
           updated: 0,
           skipped: 0,
           ignored: 1,
           errors: 0,
-          parentId,
-          reason: 'parent_status_sync_disabled',
+          taskId: String(taskId),
+          reason: 'date_status_sync_disabled',
         }
-      : await syncParentStatusFromSubtasks(parentId);
+      : await syncTaskStatusFromDates(task);
+
+    if (isDateUpdateEvent && config?.dateStatusSyncEnabled === false) {
+      await appendRun({
+        type: 'webhook',
+        message: 'DATE STATUS SYNC: ignored (disabled)',
+        action: 'date_status_ignored_disabled',
+        event,
+        taskId,
+        parentId,
+        taskName: task.name,
+        status: task.status?.status,
+        listId: taskListId,
+        dateStatusResult,
+        timestamp: Date.now(),
+      });
+
+      return NextResponse.json({ ok: true, ignored: 'date_status_sync_disabled', dateStatusResult });
+    }
+
+    const shouldSyncParent = event === 'taskStatusUpdated' || dateStatusResult.updated > 0;
+    const result = shouldSyncParent
+      ? await syncParentTask(parentId)
+      : { updated: 0, skipped: 0, ignored: 1, errors: 0, reason: 'parent_sync_not_needed' };
+    const parentStatusResult = shouldSyncParent
+      ? config?.parentStatusSyncEnabled === false
+        ? {
+            updated: 0,
+            skipped: 0,
+            ignored: 1,
+            errors: 0,
+            parentId,
+            reason: 'parent_status_sync_disabled',
+          }
+        : await syncParentStatusFromSubtasks(parentId)
+      : {
+          updated: 0,
+          skipped: 0,
+          ignored: 1,
+          errors: 0,
+          parentId,
+          reason: 'parent_status_sync_not_needed',
+        };
 
     await appendRun({
       type: 'webhook',
-      message: 'WEBHOOK SYNC: success',
-      action: 'synced',
+      message: isDateUpdateEvent ? 'DATE STATUS SYNC: success' : 'WEBHOOK SYNC: success',
+      action: isDateUpdateEvent ? 'date_status_synced' : 'synced',
+      event,
       taskId,
       parentId,
       taskName: task.name,
       status: task.status?.status,
       listId: taskListId,
+      dateStatusResult,
       result,
       parentStatusResult,
       timestamp: Date.now(),
@@ -118,6 +193,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       ok: true,
       parentSynced: parentId,
+      dateStatusResult,
       result,
       parentStatusResult,
     });

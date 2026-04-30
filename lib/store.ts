@@ -171,6 +171,7 @@ function compactSetupResult(result: any) {
           id: webhook?.id,
           listId: webhook?.listId,
           listName: webhook?.listName,
+          events: webhook?.events,
         }))
       : undefined,
   };
