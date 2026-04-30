@@ -1,6 +1,51 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { appendRun, getConfig } from '../../../lib/store';
-import { syncLists } from '../../../lib/clickup';
+import { after, NextRequest, NextResponse } from 'next/server';
+import { appendRun, getConfig, saveConfig } from '../../../lib/store';
+import { createManualSyncState, manualSyncStateToResult, runManualSyncChunk } from '../../../lib/clickup';
+
+async function runManualSyncToCompletion(initialState: any) {
+  let state = initialState;
+
+  try {
+    while (state.status === 'running') {
+      const chunk = await runManualSyncChunk(state);
+      state = chunk.state;
+      const latestConfig = await getConfig();
+      await saveConfig({
+        ...latestConfig,
+        manualSync: state,
+      });
+    }
+
+    await appendRun({
+      type: 'manual',
+      ok: true,
+      action: 'completed_background',
+      result: manualSyncStateToResult(state),
+      date: new Date().toISOString(),
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'sync_failed';
+    const latestConfig = await getConfig();
+    await saveConfig({
+      ...latestConfig,
+      manualSync: {
+        ...state,
+        status: 'failed',
+        failedAt: new Date().toISOString(),
+        error: message,
+      },
+    });
+
+    await appendRun({
+      type: 'manual',
+      ok: false,
+      action: 'failed_background',
+      error: message,
+      result: state ? manualSyncStateToResult(state) : null,
+      date: new Date().toISOString(),
+    });
+  }
+}
 
 export async function POST(req: NextRequest) {
   const cookieAuth = req.cookies.get('ca_auth')?.value === '1';
@@ -42,20 +87,23 @@ export async function POST(req: NextRequest) {
       return NextResponse.redirect(new URL('/?error=no_list_configured', req.url), { status: 303 });
     }
 
-    const result = await syncLists(listIds, {
+    if (config?.manualSync?.status === 'running') {
+      return NextResponse.redirect(new URL('/', req.url), { status: 303 });
+    }
+
+    const options = {
       includeCustomFieldSync: config?.autoSyncEnabled !== false,
       includeParentStatusSync: config?.parentStatusSyncEnabled !== false,
       includeDateStatusSync: config?.dateStatusSyncEnabled !== false,
+    };
+    const state = await createManualSyncState(listIds, options);
+
+    await saveConfig({
+      ...config,
+      manualSync: state,
     });
 
-    try {
-      await appendRun({
-        type: 'manual',
-        ok: true,
-        result,
-        date: new Date().toISOString(),
-      });
-    } catch {}
+    after(() => runManualSyncToCompletion(state));
 
     return NextResponse.redirect(new URL('/', req.url), { status: 303 });
   } catch (error) {

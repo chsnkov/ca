@@ -76,6 +76,7 @@ function Dashboard({
   webhookSyncEnabled,
   parentStatusSyncEnabled,
   dateStatusSyncEnabled,
+  manualSync,
   lastScheduledRunAt,
   nextScheduledRunAt,
   schedulerReady,
@@ -89,11 +90,26 @@ function Dashboard({
   webhookSyncEnabled: boolean;
   parentStatusSyncEnabled: boolean;
   dateStatusSyncEnabled: boolean;
+  manualSync: any;
   lastScheduledRunAt: string | null;
   nextScheduledRunAt: string | null;
   schedulerReady: boolean;
 }) {
   const selectedLists = lists.filter(l => selectedListIds.includes(l.id));
+  const manualSyncProgress = manualSync?.status === 'running'
+    ? (() => {
+        const processed = (manualSync.subtaskCursorIndex || 0) + (manualSync.rootCursorIndex || 0);
+        const total = (manualSync.subtaskIds?.length || 0) + (manualSync.rootTaskIds?.length || 0);
+        return {
+          processed,
+          total,
+          remaining: Math.max(0, total - processed),
+          currentStage: (manualSync.subtaskCursorIndex || 0) < (manualSync.subtaskIds?.length || 0)
+            ? 'Date status sync'
+            : 'Parent/custom sync',
+        };
+      })()
+    : null;
   const groupedLists = lists.reduce<SpaceGroup[]>((groups, list) => {
     const spaceLabel = list.spaceName || 'Unsorted';
     const folderLabel = list.folderName || 'No folder';
@@ -118,6 +134,7 @@ function Dashboard({
 
   return (
     <main style={{ padding: 20, fontFamily: 'sans-serif', maxWidth: 900, margin: '0 auto' }}>
+      {manualSyncProgress && <meta httpEquiv="refresh" content="5" />}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <h1>ClickUp Sync Dashboard</h1>
         <form method="post" action="/api/logout">
@@ -271,8 +288,25 @@ function Dashboard({
             Timer: <strong>{autoSyncEnabled ? <ScheduleTimer nextRunAt={nextScheduledRunAt} /> : 'disabled'}</strong>
           </div>
         </div>
+        {manualSyncProgress && (
+          <div style={{ border: '1px solid #1f2937', borderRadius: 8, padding: 12, marginBottom: 12, display: 'grid', gap: 6 }}>
+            <strong>Manual sync: running</strong>
+            <span>
+              Processed: {manualSyncProgress.processed}/{manualSyncProgress.total}
+              {manualSyncProgress.remaining > 0 ? `, remaining: ${manualSyncProgress.remaining}` : ''}
+            </span>
+            <span>Next chunk: {manualSyncProgress.currentStage}</span>
+            {manualSync.lastChunk && (
+              <span>
+                Last chunk: {manualSync.lastChunk.stage}, {manualSync.lastChunk.processed} items
+              </span>
+            )}
+          </div>
+        )}
         <form method="post" action="/api/run?redirect=1">
-          <button type="submit">Run Full Sync</button>
+          <button type="submit" disabled={Boolean(manualSyncProgress)}>
+            {manualSyncProgress ? 'Manual Sync Running' : 'Run Full Sync'}
+          </button>
         </form>
       </section>
 
@@ -326,6 +360,7 @@ export default async function Page(props: { searchParams?: Promise<{ error?: str
   const webhookSyncEnabled = config?.webhookSyncEnabled !== false;
   const parentStatusSyncEnabled = config?.parentStatusSyncEnabled !== false;
   const dateStatusSyncEnabled = config?.dateStatusSyncEnabled !== false;
+  const manualSync = config?.manualSync || null;
   const schedule = getScheduleSummary(config, stats);
 
   return (
@@ -339,6 +374,7 @@ export default async function Page(props: { searchParams?: Promise<{ error?: str
       webhookSyncEnabled={webhookSyncEnabled}
       parentStatusSyncEnabled={parentStatusSyncEnabled}
       dateStatusSyncEnabled={dateStatusSyncEnabled}
+      manualSync={manualSync}
       lastScheduledRunAt={schedule.lastScheduledRunAt}
       nextScheduledRunAt={schedule.nextScheduledRunAt}
       schedulerReady={Boolean(process.env.ADMIN_TOKEN)}
