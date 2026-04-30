@@ -108,20 +108,18 @@ function getParentStatusDecision(subtasks: ClickUpTask[]) {
     status === PARENT_STATUS_TO_DO ||
     status === PARENT_STATUS_COMPLETE,
   );
-  const hasCompleteWithPlannedStatus = counts[PARENT_STATUS_COMPLETE] && counts[PARENT_STATUS_PLANNED];
-
-  if (onlyPlannedToDoAndComplete && hasCompleteWithPlannedStatus) {
+  if (onlyPlannedToDoAndComplete && counts[PARENT_STATUS_COMPLETE] && counts[PARENT_STATUS_TO_DO]) {
     return {
-      desiredStatus: PARENT_STATUS_PAUSED,
-      reason: 'complete_with_planned',
+      desiredStatus: PARENT_STATUS_TO_DO,
+      reason: 'complete_with_to_do',
       counts,
     };
   }
 
-  if (statuses.length === 2 && counts[PARENT_STATUS_COMPLETE] && counts[PARENT_STATUS_TO_DO]) {
+  if (onlyPlannedToDoAndComplete && counts[PARENT_STATUS_COMPLETE] && counts[PARENT_STATUS_PLANNED]) {
     return {
-      desiredStatus: PARENT_STATUS_TO_DO,
-      reason: 'complete_and_to_do',
+      desiredStatus: PARENT_STATUS_PAUSED,
+      reason: 'complete_with_planned',
       counts,
     };
   }
