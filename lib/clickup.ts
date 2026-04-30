@@ -64,18 +64,48 @@ function token() {
   return process.env.CLICKUP_TOKEN;
 }
 
-async function req(path: string, init: RequestInit = {}) {
-  const res = await fetch(`${API}${path}`, {
-    ...init,
-    headers: {
-      Authorization: token(),
-      'Content-Type': 'application/json',
-      ...(init.headers || {}),
-    },
-  });
-  const text = await res.text();
-  if (!res.ok) throw new Error(`ClickUp ${path} failed: ${res.status} ${text}`);
-  return text ? JSON.parse(text) : null;
+function isTemporaryClickUpStatus(status: number) {
+  return status === 429 || status === 500 || status === 502 || status === 503 || status === 504;
+}
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function req(path: string, init: RequestInit = {}, attempt = 0): Promise<any> {
+  try {
+    const res = await fetch(`${API}${path}`, {
+      ...init,
+      headers: {
+        Authorization: token(),
+        'Content-Type': 'application/json',
+        ...(init.headers || {}),
+      },
+    });
+    const text = await res.text();
+
+    if (!res.ok) {
+      if (attempt === 0 && isTemporaryClickUpStatus(res.status)) {
+        await sleep(1000);
+        return req(path, init, attempt + 1);
+      }
+
+      throw new Error(`ClickUp ${path} failed: ${res.status} ${text}`);
+    }
+
+    return text ? JSON.parse(text) : null;
+  } catch (error: any) {
+    if (String(error?.message || '').startsWith(`ClickUp ${path} failed:`)) {
+      throw error;
+    }
+
+    if (attempt === 0) {
+      await sleep(1000);
+      return req(path, init, attempt + 1);
+    }
+
+    throw error;
+  }
 }
 
 function norm(s: string) {

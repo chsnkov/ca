@@ -3,21 +3,48 @@ import { getConfig, saveConfig } from './store';
 const API = 'https://api.clickup.com/api/v2';
 const WEBHOOK_EVENTS = ['taskStatusUpdated', 'taskUpdated'];
 
-async function clickupReq(path: string, init?: RequestInit) {
-  const res = await fetch(API + path, {
-    ...init,
-    headers: {
-      Authorization: process.env.CLICKUP_TOKEN || '',
-      'Content-Type': 'application/json',
-      ...(init?.headers || {}),
-    },
-  });
+function isTemporaryClickUpStatus(status: number) {
+  return status === 429 || status === 500 || status === 502 || status === 503 || status === 504;
+}
 
-  if (!res.ok) {
-    throw new Error(await res.text());
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function clickupReq(path: string, init?: RequestInit, attempt = 0): Promise<any> {
+  try {
+    const res = await fetch(API + path, {
+      ...init,
+      headers: {
+        Authorization: process.env.CLICKUP_TOKEN || '',
+        'Content-Type': 'application/json',
+        ...(init?.headers || {}),
+      },
+    });
+
+    if (!res.ok) {
+      const text = await res.text();
+      if (attempt === 0 && isTemporaryClickUpStatus(res.status)) {
+        await sleep(1000);
+        return clickupReq(path, init, attempt + 1);
+      }
+
+      throw new Error(`ClickUp ${path} failed: ${res.status} ${text}`);
+    }
+
+    return res.json();
+  } catch (error: any) {
+    if (String(error?.message || '').startsWith(`ClickUp ${path} failed:`)) {
+      throw error;
+    }
+
+    if (attempt === 0) {
+      await sleep(1000);
+      return clickupReq(path, init, attempt + 1);
+    }
+
+    throw error;
   }
-
-  return res.json();
 }
 
 async function getListName(listId: string) {
