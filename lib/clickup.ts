@@ -57,21 +57,27 @@ const PARENT_STATUS_TO_DO = 'TO DO';
 const PARENT_STATUS_IN_PROGRESS = 'IN PROGRESS';
 const PARENT_STATUS_COMPLETE = 'COMPLETE';
 const PARENT_STATUS_PAUSED = 'PAUSED';
+const PARENT_STATUS_FIX = 'FIX';
+const PARENT_STATUS_TO_CHECK = 'TO CHECK';
 
-const PARENT_STATUS_WORKING_STATUSES = new Set(['IN PROGRESS', 'FIX', 'TO CHECK']);
+const PARENT_STATUS_WORKING_STATUSES = new Set([
+  PARENT_STATUS_IN_PROGRESS,
+  PARENT_STATUS_FIX,
+  PARENT_STATUS_TO_CHECK,
+]);
 const PARENT_STATUS_TRACKED_STATUSES = new Set([
   PARENT_STATUS_PLANNED,
   PARENT_STATUS_TO_DO,
   PARENT_STATUS_IN_PROGRESS,
-  'FIX',
-  'TO CHECK',
+  PARENT_STATUS_FIX,
+  PARENT_STATUS_TO_CHECK,
   PARENT_STATUS_COMPLETE,
 ]);
 
 const DATE_STATUS_IGNORED_STATUSES = new Set([
   PARENT_STATUS_IN_PROGRESS,
-  'FIX',
-  'TO CHECK',
+  PARENT_STATUS_FIX,
+  PARENT_STATUS_TO_CHECK,
   PARENT_STATUS_COMPLETE,
   'CANCELED',
   'NO NEED',
@@ -95,7 +101,17 @@ function getParentStatusDecision(subtasks: ClickUpTask[]) {
     };
   }
 
-  if (statuses.some((status) => PARENT_STATUS_WORKING_STATUSES.has(status))) {
+  const workingStatuses = statuses.filter((status) => PARENT_STATUS_WORKING_STATUSES.has(status));
+
+  if (workingStatuses.length === 1 && workingStatuses[0] !== PARENT_STATUS_IN_PROGRESS) {
+    return {
+      desiredStatus: workingStatuses[0],
+      reason: `single_${workingStatuses[0].toLowerCase().replace(/\s+/g, '_')}_subtask_status`,
+      counts,
+    };
+  }
+
+  if (workingStatuses.length) {
     return {
       desiredStatus: PARENT_STATUS_IN_PROGRESS,
       reason: 'working_subtask_status',
