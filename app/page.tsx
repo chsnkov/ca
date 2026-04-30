@@ -135,6 +135,13 @@ function Dashboard({
   return (
     <main style={{ padding: 20, fontFamily: 'sans-serif', maxWidth: 900, margin: '0 auto' }}>
       {manualSyncProgress && <meta httpEquiv="refresh" content="5" />}
+      {manualSyncProgress && (
+        <script
+          dangerouslySetInnerHTML={{
+            __html: "setTimeout(function(){var f=document.getElementById('manual-sync-runner'); if(f && !f.dataset.submitted){f.dataset.submitted='1'; f.requestSubmit();}}, 1500);",
+          }}
+        />
+      )}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <h1>ClickUp Sync Dashboard</h1>
         <form method="post" action="/api/logout">
@@ -303,7 +310,7 @@ function Dashboard({
             )}
           </div>
         )}
-        <form method="post" action="/api/run?redirect=1">
+        <form id="manual-sync-runner" method="post" action="/api/run?redirect=1">
           <button type="submit" disabled={Boolean(manualSyncProgress)}>
             {manualSyncProgress ? 'Manual Sync Running' : 'Run Full Sync'}
           </button>
