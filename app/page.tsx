@@ -275,6 +275,7 @@ function Dashboard({
           )}
           <div style={{ border: '1px solid #1f2937', borderRadius: 8, padding: 12, display: 'grid', gap: 10 }}>
             <h3 style={{ margin: 0, fontSize: 16 }}>Automation Toggles</h3>
+            <form id="manual-sync-runner" method="post" action="/api/run?redirect=1" />
             <form method="post" action="/api/config" style={{ display: 'grid', gap: 12 }}>
               <input type="hidden" name="configAction" value="syncToggles" />
               {[
@@ -377,6 +378,15 @@ function Dashboard({
                     <span>Date based status sync</span>
                   </label>
                 </div>
+                <div>
+                  <button
+                    type="submit"
+                    form="manual-sync-runner"
+                    disabled={Boolean(manualSyncProgress) || !manualSyncCanRun}
+                  >
+                    {manualSyncProgress ? 'Manual Sync Running' : 'Run Full Sync'}
+                  </button>
+                </div>
               </div>
               <button type="submit">Save Sync Toggles</button>
             </form>
@@ -425,11 +435,6 @@ function Dashboard({
             )}
           </div>
         )}
-        <form id="manual-sync-runner" method="post" action="/api/run?redirect=1">
-          <button type="submit" disabled={Boolean(manualSyncProgress) || !manualSyncCanRun}>
-            {manualSyncProgress ? 'Manual Sync Running' : 'Run Full Sync'}
-          </button>
-        </form>
       </section>
 
       <section style={{ margin: '20px 0', padding: 16, border: '1px solid #333', borderRadius: 8 }}>
