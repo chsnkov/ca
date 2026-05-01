@@ -30,6 +30,8 @@ type FullSyncOptions = {
   includeCustomFieldSync?: boolean;
   includeParentStatusSync?: boolean;
   includeDateStatusSync?: boolean;
+  mode?: 'smart' | 'bruteForce';
+  updatedAfter?: string | null;
 };
 
 export type ManualSyncState = {
@@ -472,15 +474,18 @@ async function syncParentStatusFromTask(parent: ClickUpTask & { subtasks?: Click
   }
 }
 
-async function getSubtasksFromList(listId: string) {
+async function getSubtasksFromList(listId: string, updatedAfter?: string | null) {
   const subtasks: ClickUpTask[] = [];
   let totalApiItems = 0;
+  let totalSubtasks = 0;
   let page = 0;
 
   while (true) {
     const tasks = await fetchListPage(listId, page, true);
     totalApiItems += tasks.length;
-    subtasks.push(...tasks.filter((task) => task.parent));
+    const subtasksOnPage = tasks.filter((task) => task.parent);
+    totalSubtasks += subtasksOnPage.length;
+    subtasks.push(...subtasksOnPage.filter((task) => isUpdatedAfter(task, updatedAfter)));
 
     if (tasks.length < PAGE_SIZE) break;
     page += 1;
@@ -492,7 +497,9 @@ async function getSubtasksFromList(listId: string) {
       listId,
       pagesFetched: page + 1,
       totalApiItems,
+      totalSubtasks,
       candidateSubtasks: subtasks.length,
+      updatedAfter: updatedAfter || null,
     },
   };
 }
@@ -609,12 +616,12 @@ export async function discoverUpdatedRootTasks(listIds: string[], updatedAfter?:
   return { taskIds, discovery };
 }
 
-async function discoverSubtasks(listIds: string[]) {
+async function discoverSubtasks(listIds: string[], updatedAfter?: string | null) {
   const tasks: ClickUpTask[] = [];
   const discovery: any[] = [];
 
   for (const listId of listIds) {
-    const result = await getSubtasksFromList(listId);
+    const result = await getSubtasksFromList(listId, updatedAfter);
     discovery.push(result.discovery);
     tasks.push(...result.subtasks);
   }
@@ -622,8 +629,8 @@ async function discoverSubtasks(listIds: string[]) {
   return { tasks, discovery };
 }
 
-async function discoverSubtaskIds(listIds: string[]) {
-  const result = await discoverSubtasks(listIds);
+async function discoverSubtaskIds(listIds: string[], updatedAfter?: string | null) {
+  const result = await discoverSubtasks(listIds, updatedAfter);
   return {
     taskIds: result.tasks.map((task) => String(task.id)),
     discovery: result.discovery,
@@ -874,10 +881,15 @@ export async function syncDateStatusForTaskIds(
 }
 
 function normalizeFullSyncOptions(options: FullSyncOptions): Required<FullSyncOptions> {
+  const updatedAfterMs = options.updatedAfter ? Date.parse(options.updatedAfter) : NaN;
+  const updatedAfter = Number.isNaN(updatedAfterMs) ? null : new Date(updatedAfterMs).toISOString();
+
   return {
     includeCustomFieldSync: options.includeCustomFieldSync !== false,
     includeParentStatusSync: options.includeParentStatusSync === true,
     includeDateStatusSync: options.includeDateStatusSync === true,
+    mode: options.mode === 'smart' ? 'smart' : 'bruteForce',
+    updatedAfter,
   };
 }
 
@@ -910,13 +922,13 @@ export async function createManualSyncState(listIds: string[], options: FullSync
   let dateStatusDiscovery: any[] = [];
 
   if (normalizedOptions.includeDateStatusSync) {
-    const subtaskDiscovery = await discoverSubtaskIds(listIds);
+    const subtaskDiscovery = await discoverSubtaskIds(listIds, normalizedOptions.updatedAfter);
     subtaskIds = subtaskDiscovery.taskIds;
     dateStatusDiscovery = subtaskDiscovery.discovery;
   }
 
   if (normalizedOptions.includeCustomFieldSync || normalizedOptions.includeParentStatusSync) {
-    const rootDiscovery = await discoverUpdatedRootTasks(listIds, null);
+    const rootDiscovery = await discoverUpdatedRootTasks(listIds, normalizedOptions.updatedAfter);
     rootTaskIds = rootDiscovery.taskIds;
     discovery = rootDiscovery.discovery;
   }

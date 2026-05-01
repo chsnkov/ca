@@ -1,7 +1,40 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { appendRun, getConfig, saveConfig } from '../../../lib/store';
+import { appendRun, getConfig, getStats, saveConfig } from '../../../lib/store';
 import { createManualSyncState, manualSyncStateToResult, runManualSyncChunk } from '../../../lib/clickup';
 import { getSyncToggles } from '../../../lib/sync-toggles';
+
+function normalizeDate(value: any) {
+  if (!value) return null;
+  const time = Date.parse(String(value));
+  return Number.isNaN(time) ? null : new Date(time).toISOString();
+}
+
+function latestDate(...values: Array<string | null>) {
+  return values
+    .filter(Boolean)
+    .sort((a, b) => Date.parse(String(b)) - Date.parse(String(a)))[0] || null;
+}
+
+function getLastSuccessfulRunFromStats(stats: any) {
+  const runs = Array.isArray(stats?.runs) ? stats.runs : [];
+  const candidates = runs
+    .filter((run: any) => (run?.type === 'scheduled' || run?.type === 'manual') && run?.ok === true)
+    .map((run: any) => normalizeDate(run?.startedAt || run?.result?.startedAt || run?.date || run?.finishedAt || run?.timestamp))
+    .filter(Boolean);
+
+  return latestDate(...candidates);
+}
+
+function getManualSmartUpdatedAfter(config: any, stats: any) {
+  return latestDate(
+    normalizeDate(config?.lastManualSyncStartedAt),
+    normalizeDate(config?.autoSync?.lastStartedAt),
+    normalizeDate(config?.lastScheduledRunAt),
+    getLastSuccessfulRunFromStats(stats),
+    normalizeDate(config?.autoSync?.lastFinishedAt),
+    normalizeDate(config?.lastScheduledRunFinishedAt),
+  );
+}
 
 export async function POST(req: NextRequest) {
   const cookieAuth = req.cookies.get('ca_auth')?.value === '1';
@@ -32,7 +65,7 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const config = await getConfig();
+    const [config, stats] = await Promise.all([getConfig(), getStats()]);
     const listIds = config?.selectedListIds?.length
       ? config.selectedListIds
       : process.env.CLICKUP_LIST_ID
@@ -44,20 +77,33 @@ export async function POST(req: NextRequest) {
     }
 
     const syncToggles = getSyncToggles(config);
+    const manualUpdatedAfter = syncToggles.manual.mode === 'smart'
+      ? getManualSmartUpdatedAfter(config, stats)
+      : null;
     const options = {
-      includeCustomFieldSync: syncToggles.auto.customFieldSync,
-      includeParentStatusSync: syncToggles.auto.parentStatusSync,
-      includeDateStatusSync: syncToggles.auto.dateStatusSync,
+      includeCustomFieldSync: syncToggles.manual.customFieldSync,
+      includeParentStatusSync: syncToggles.manual.parentStatusSync,
+      includeDateStatusSync: syncToggles.manual.dateStatusSync,
+      mode: syncToggles.manual.mode,
+      updatedAfter: manualUpdatedAfter,
     };
     const initialState = config?.manualSync?.status === 'running'
       ? config.manualSync
       : await createManualSyncState(listIds, options);
     const { state, result } = await runManualSyncChunk(initialState);
 
-    await saveConfig({
+    const nextConfig = {
       ...config,
       manualSync: state,
-    });
+      ...(state.status === 'idle'
+        ? {
+            lastManualSyncStartedAt: state.startedAt,
+            lastManualSyncFinishedAt: state.finishedAt || new Date().toISOString(),
+          }
+        : {}),
+    };
+
+    await saveConfig(nextConfig);
 
     if (state.status === 'idle') {
       await appendRun({
@@ -65,6 +111,7 @@ export async function POST(req: NextRequest) {
         ok: true,
         action: 'completed_chunks',
         result,
+        options: state.options,
         date: new Date().toISOString(),
       });
     }

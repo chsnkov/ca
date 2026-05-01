@@ -46,6 +46,15 @@ function formToggleSection(form: FormData, prefix: 'autoSync' | 'webhook') {
   };
 }
 
+function formManualToggleSection(form: FormData) {
+  return {
+    mode: form.get('manualSyncMode') === 'smart' ? 'smart' as const : 'bruteForce' as const,
+    customFieldSync: isChecked(form.get('manualSyncCustomFieldSyncEnabled')),
+    parentStatusSync: isChecked(form.get('manualSyncParentStatusSyncEnabled')),
+    dateStatusSync: isChecked(form.get('manualSyncDateStatusSyncEnabled')),
+  };
+}
+
 export async function POST(req: NextRequest) {
   if (!isRequestAuthenticated(req)) {
     return unauthorizedRedirect(req);
@@ -70,6 +79,7 @@ export async function POST(req: NextRequest) {
         ...flattenSyncToggles({
           auto: formToggleSection(form, 'autoSync'),
           webhook: formToggleSection(form, 'webhook'),
+          manual: formManualToggleSection(form),
         }),
       });
       const flatToggles = flattenSyncToggles(syncToggles);

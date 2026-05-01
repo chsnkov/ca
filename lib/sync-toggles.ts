@@ -5,9 +5,19 @@ type SyncToggleSection = {
   dateStatusSync: boolean;
 };
 
+export type ManualSyncMode = 'smart' | 'bruteForce';
+
+type ManualSyncToggleSection = {
+  mode: ManualSyncMode;
+  customFieldSync: boolean;
+  parentStatusSync: boolean;
+  dateStatusSync: boolean;
+};
+
 export type SyncToggles = {
   auto: SyncToggleSection;
   webhook: SyncToggleSection;
+  manual: ManualSyncToggleSection;
 };
 
 function bool(value: any, fallback: boolean) {
@@ -32,6 +42,10 @@ function effectiveSection(master: boolean, customFieldSync: boolean, parentStatu
   };
 }
 
+function manualMode(value: any): ManualSyncMode {
+  return value === 'smart' ? 'smart' : 'bruteForce';
+}
+
 export function getSyncToggles(config: any): SyncToggles {
   const autoMaster = bool(config?.autoSyncEnabled, true);
   const webhookMaster = bool(config?.webhookSyncEnabled, true);
@@ -51,6 +65,12 @@ export function getSyncToggles(config: any): SyncToggles {
       bool(config?.webhookParentStatusSyncEnabled, legacyParentStatus),
       bool(config?.webhookDateStatusSyncEnabled, legacyDateStatus),
     ),
+    manual: {
+      mode: manualMode(config?.manualSyncMode),
+      customFieldSync: bool(config?.manualSyncCustomFieldSyncEnabled, true),
+      parentStatusSync: bool(config?.manualSyncParentStatusSyncEnabled, legacyParentStatus),
+      dateStatusSync: bool(config?.manualSyncDateStatusSyncEnabled, legacyDateStatus),
+    },
   };
 }
 
@@ -64,5 +84,9 @@ export function flattenSyncToggles(toggles: SyncToggles) {
     webhookCustomFieldSyncEnabled: toggles.webhook.customFieldSync,
     webhookParentStatusSyncEnabled: toggles.webhook.parentStatusSync,
     webhookDateStatusSyncEnabled: toggles.webhook.dateStatusSync,
+    manualSyncMode: toggles.manual.mode,
+    manualSyncCustomFieldSyncEnabled: toggles.manual.customFieldSync,
+    manualSyncParentStatusSyncEnabled: toggles.manual.parentStatusSync,
+    manualSyncDateStatusSyncEnabled: toggles.manual.dateStatusSync,
   };
 }

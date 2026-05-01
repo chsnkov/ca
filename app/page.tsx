@@ -92,6 +92,11 @@ function Dashboard({
 }) {
   const selectedLists = lists.filter(l => selectedListIds.includes(l.id));
   const autoSyncEnabled = syncToggles.auto.enabled;
+  const manualSyncCanRun = Boolean(
+    syncToggles.manual.customFieldSync ||
+    syncToggles.manual.parentStatusSync ||
+    syncToggles.manual.dateStatusSync,
+  );
   const manualSyncProgress = manualSync?.status === 'running'
     ? (() => {
         const processed = (manualSync.subtaskCursorIndex || 0) + (manualSync.rootCursorIndex || 0);
@@ -324,6 +329,55 @@ function Dashboard({
                   </div>
                 </div>
               ))}
+              <div style={{ border: '1px solid #111827', borderRadius: 8, padding: 10, display: 'grid', gap: 8 }}>
+                <strong>Manual sync</strong>
+                <div style={{ display: 'flex', gap: 14, alignItems: 'center', flexWrap: 'wrap' }}>
+                  <label style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                    <input
+                      name="manualSyncMode"
+                      type="radio"
+                      value="smart"
+                      defaultChecked={syncToggles.manual.mode === 'smart'}
+                    />
+                    <span>Smart sync</span>
+                  </label>
+                  <label style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                    <input
+                      name="manualSyncMode"
+                      type="radio"
+                      value="bruteForce"
+                      defaultChecked={syncToggles.manual.mode !== 'smart'}
+                    />
+                    <span>Brute force all tasks</span>
+                  </label>
+                </div>
+                <div style={{ display: 'flex', gap: 14, alignItems: 'center', flexWrap: 'wrap', paddingLeft: 20 }}>
+                  <label style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                    <input
+                      name="manualSyncCustomFieldSyncEnabled"
+                      type="checkbox"
+                      defaultChecked={syncToggles.manual.customFieldSync}
+                    />
+                    <span>Custom field sync</span>
+                  </label>
+                  <label style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                    <input
+                      name="manualSyncParentStatusSyncEnabled"
+                      type="checkbox"
+                      defaultChecked={syncToggles.manual.parentStatusSync}
+                    />
+                    <span>Parent status sync</span>
+                  </label>
+                  <label style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                    <input
+                      name="manualSyncDateStatusSyncEnabled"
+                      type="checkbox"
+                      defaultChecked={syncToggles.manual.dateStatusSync}
+                    />
+                    <span>Date based status sync</span>
+                  </label>
+                </div>
+              </div>
               <button type="submit">Save Sync Toggles</button>
             </form>
           </div>
@@ -372,7 +426,7 @@ function Dashboard({
           </div>
         )}
         <form id="manual-sync-runner" method="post" action="/api/run?redirect=1">
-          <button type="submit" disabled={Boolean(manualSyncProgress)}>
+          <button type="submit" disabled={Boolean(manualSyncProgress) || !manualSyncCanRun}>
             {manualSyncProgress ? 'Manual Sync Running' : 'Run Full Sync'}
           </button>
         </form>
