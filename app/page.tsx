@@ -2,6 +2,7 @@ import { getConfig, getStats } from '../lib/store';
 import { getLists } from '../lib/clickup';
 import { isAuthenticated } from '../lib/auth';
 import { getScheduleSummary } from '../lib/scheduler';
+import { getSyncToggles } from '../lib/sync-toggles';
 import ScheduleTimer from './schedule-timer';
 
 // noop: trigger redeploy v2
@@ -72,10 +73,7 @@ function Dashboard({
   listsError,
   selectedListIds,
   syncIntervalMinutes,
-  autoSyncEnabled,
-  webhookSyncEnabled,
-  parentStatusSyncEnabled,
-  dateStatusSyncEnabled,
+  syncToggles,
   manualSync,
   lastScheduledRunAt,
   nextScheduledRunAt,
@@ -86,16 +84,14 @@ function Dashboard({
   listsError?: string;
   selectedListIds: string[];
   syncIntervalMinutes: number;
-  autoSyncEnabled: boolean;
-  webhookSyncEnabled: boolean;
-  parentStatusSyncEnabled: boolean;
-  dateStatusSyncEnabled: boolean;
+  syncToggles: any;
   manualSync: any;
   lastScheduledRunAt: string | null;
   nextScheduledRunAt: string | null;
   schedulerReady: boolean;
 }) {
   const selectedLists = lists.filter(l => selectedListIds.includes(l.id));
+  const autoSyncEnabled = syncToggles.auto.enabled;
   const manualSyncProgress = manualSync?.status === 'running'
     ? (() => {
         const processed = (manualSync.subtaskCursorIndex || 0) + (manualSync.rootCursorIndex || 0);
@@ -142,6 +138,35 @@ function Dashboard({
           }}
         />
       )}
+      <script
+        dangerouslySetInnerHTML={{
+          __html: `
+            document.addEventListener('change', function(event) {
+              var target = event.target;
+              if (!target || !target.matches || !target.matches('[data-sync-master], [data-sync-child]')) return;
+              var sectionName = target.getAttribute('data-sync-master') || target.getAttribute('data-sync-child');
+              var section = document.querySelector('[data-sync-section="' + sectionName + '"]');
+              if (!section) return;
+              var master = section.querySelector('[data-sync-master]');
+              var children = Array.prototype.slice.call(section.querySelectorAll('[data-sync-child]'));
+              if (target === master) {
+                children.forEach(function(child) {
+                  child.disabled = !master.checked;
+                  child.checked = master.checked;
+                });
+                return;
+              }
+              var anyChecked = children.some(function(child) { return child.checked; });
+              if (!anyChecked) {
+                master.checked = false;
+                children.forEach(function(child) { child.disabled = true; });
+              } else {
+                master.checked = true;
+              }
+            });
+          `,
+        }}
+      />
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <h1>ClickUp Sync Dashboard</h1>
         <form method="post" action="/api/logout">
@@ -245,25 +270,61 @@ function Dashboard({
           )}
           <div style={{ border: '1px solid #1f2937', borderRadius: 8, padding: 12, display: 'grid', gap: 10 }}>
             <h3 style={{ margin: 0, fontSize: 16 }}>Automation Toggles</h3>
-            <form method="post" action="/api/config" style={{ display: 'flex', gap: 14, alignItems: 'center', flexWrap: 'wrap' }}>
-            <input type="hidden" name="configAction" value="syncToggles" />
-            <label style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-              <input name="autoSyncEnabled" type="checkbox" defaultChecked={autoSyncEnabled} />
-              <span>Auto sync</span>
-            </label>
-            <label style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-              <input name="webhookSyncEnabled" type="checkbox" defaultChecked={webhookSyncEnabled} />
-              <span>Webhook sync</span>
-            </label>
-            <label style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-              <input name="parentStatusSyncEnabled" type="checkbox" defaultChecked={parentStatusSyncEnabled} />
-              <span>Parent status sync</span>
-            </label>
-            <label style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-              <input name="dateStatusSyncEnabled" type="checkbox" defaultChecked={dateStatusSyncEnabled} />
-              <span>Date status sync</span>
-            </label>
-            <button type="submit">Save Sync Toggles</button>
+            <form method="post" action="/api/config" style={{ display: 'grid', gap: 12 }}>
+              <input type="hidden" name="configAction" value="syncToggles" />
+              {[
+                ['autoSync', 'Auto sync', syncToggles.auto],
+                ['webhook', 'Webhook sync', syncToggles.webhook],
+              ].map(([prefix, label, section]: any) => (
+                <div
+                  key={prefix}
+                  data-sync-section={prefix}
+                  style={{ border: '1px solid #111827', borderRadius: 8, padding: 10, display: 'grid', gap: 8 }}
+                >
+                  <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontWeight: 700 }}>
+                    <input
+                      name={`${prefix}Enabled`}
+                      type="checkbox"
+                      defaultChecked={section.enabled}
+                      data-sync-master={prefix}
+                    />
+                    <span>{label}</span>
+                  </label>
+                  <div style={{ display: 'flex', gap: 14, alignItems: 'center', flexWrap: 'wrap', paddingLeft: 20 }}>
+                    <label style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                      <input
+                        name={`${prefix}CustomFieldSyncEnabled`}
+                        type="checkbox"
+                        defaultChecked={section.customFieldSync}
+                        disabled={!section.enabled}
+                        data-sync-child={prefix}
+                      />
+                      <span>Custom field sync</span>
+                    </label>
+                    <label style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                      <input
+                        name={`${prefix}ParentStatusSyncEnabled`}
+                        type="checkbox"
+                        defaultChecked={section.parentStatusSync}
+                        disabled={!section.enabled}
+                        data-sync-child={prefix}
+                      />
+                      <span>Parent status sync</span>
+                    </label>
+                    <label style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                      <input
+                        name={`${prefix}DateStatusSyncEnabled`}
+                        type="checkbox"
+                        defaultChecked={section.dateStatusSync}
+                        disabled={!section.enabled}
+                        data-sync-child={prefix}
+                      />
+                      <span>Date based status sync</span>
+                    </label>
+                  </div>
+                </div>
+              ))}
+              <button type="submit">Save Sync Toggles</button>
             </form>
           </div>
           <form method="post" action="/api/config" style={{ display: 'flex', gap: 8, alignItems: 'end', flexWrap: 'wrap' }}>
@@ -363,10 +424,7 @@ export default async function Page(props: { searchParams?: Promise<{ error?: str
   }
 
   const selectedListIds = config?.selectedListIds || [];
-  const autoSyncEnabled = config?.autoSyncEnabled !== false;
-  const webhookSyncEnabled = config?.webhookSyncEnabled !== false;
-  const parentStatusSyncEnabled = config?.parentStatusSyncEnabled !== false;
-  const dateStatusSyncEnabled = config?.dateStatusSyncEnabled !== false;
+  const syncToggles = getSyncToggles(config);
   const manualSync = config?.manualSync || null;
   const schedule = getScheduleSummary(config, stats);
 
@@ -377,10 +435,7 @@ export default async function Page(props: { searchParams?: Promise<{ error?: str
       listsError={listsError}
       selectedListIds={selectedListIds}
       syncIntervalMinutes={schedule.syncIntervalMinutes}
-      autoSyncEnabled={autoSyncEnabled}
-      webhookSyncEnabled={webhookSyncEnabled}
-      parentStatusSyncEnabled={parentStatusSyncEnabled}
-      dateStatusSyncEnabled={dateStatusSyncEnabled}
+      syncToggles={syncToggles}
       manualSync={manualSync}
       lastScheduledRunAt={schedule.lastScheduledRunAt}
       nextScheduledRunAt={schedule.nextScheduledRunAt}

@@ -3,6 +3,7 @@ import { getConfig, saveConfig, appendRun } from '../../../lib/store';
 import { isRequestAuthenticated, unauthorizedRedirect } from '../../../lib/auth';
 import { setupWebhooks } from '../../../lib/webhooks';
 import { normalizeSyncIntervalMinutes } from '../../../lib/scheduler';
+import { flattenSyncToggles, getSyncToggles } from '../../../lib/sync-toggles';
 
 function withoutLegacyInterval(config: any) {
   const { autoSyncIntervalMinutes: _legacyAutoSyncIntervalMinutes, ...rest } = config || {};
@@ -11,6 +12,38 @@ function withoutLegacyInterval(config: any) {
 
 function isChecked(value: FormDataEntryValue | null) {
   return value === 'on' || value === 'true' || value === '1';
+}
+
+function formToggleSection(form: FormData, prefix: 'autoSync' | 'webhook') {
+  const enabled = isChecked(form.get(`${prefix}Enabled`));
+  const customFieldSync = isChecked(form.get(`${prefix}CustomFieldSyncEnabled`));
+  const parentStatusSync = isChecked(form.get(`${prefix}ParentStatusSyncEnabled`));
+  const dateStatusSync = isChecked(form.get(`${prefix}DateStatusSyncEnabled`));
+
+  if (!enabled) {
+    return {
+      enabled: false,
+      customFieldSync: false,
+      parentStatusSync: false,
+      dateStatusSync: false,
+    };
+  }
+
+  if (!customFieldSync && !parentStatusSync && !dateStatusSync) {
+    return {
+      enabled: true,
+      customFieldSync: true,
+      parentStatusSync: true,
+      dateStatusSync: true,
+    };
+  }
+
+  return {
+    enabled,
+    customFieldSync,
+    parentStatusSync,
+    dateStatusSync,
+  };
 }
 
 export async function POST(req: NextRequest) {
@@ -32,10 +65,14 @@ export async function POST(req: NextRequest) {
     }
 
     if (action === 'syncToggles') {
-      const autoSyncEnabled = isChecked(form.get('autoSyncEnabled'));
-      const webhookSyncEnabled = isChecked(form.get('webhookSyncEnabled'));
-      const parentStatusSyncEnabled = isChecked(form.get('parentStatusSyncEnabled'));
-      const dateStatusSyncEnabled = isChecked(form.get('dateStatusSyncEnabled'));
+      const syncToggles = getSyncToggles({
+        ...currentConfig,
+        ...flattenSyncToggles({
+          auto: formToggleSection(form, 'autoSync'),
+          webhook: formToggleSection(form, 'webhook'),
+        }),
+      });
+      const flatToggles = flattenSyncToggles(syncToggles);
       const existingListIds = Array.isArray(currentConfig?.selectedListIds)
         ? currentConfig.selectedListIds.map(String).filter(Boolean)
         : [];
@@ -46,16 +83,13 @@ export async function POST(req: NextRequest) {
         ...baseConfig,
         selectedListIds: existingListIds,
         syncIntervalMinutes,
-        autoSyncEnabled,
-        webhookSyncEnabled,
-        parentStatusSyncEnabled,
-        dateStatusSyncEnabled,
-        autoSync: autoSyncEnabled
+        ...flatToggles,
+        autoSync: syncToggles.auto.enabled
           ? baseConfig.autoSync
           : { status: 'idle', disabledAt: new Date().toISOString() },
       };
 
-      if (webhookSyncEnabled && existingListIds.length) {
+      if (syncToggles.webhook.enabled && existingListIds.length) {
         try {
           const setupResult = await setupWebhooks(req.nextUrl.origin, existingListIds, nextConfig);
 
@@ -65,10 +99,7 @@ export async function POST(req: NextRequest) {
             reason: 'sync_toggles_saved',
             selectedListIds: existingListIds,
             syncIntervalMinutes,
-            autoSyncEnabled,
-            webhookSyncEnabled,
-            parentStatusSyncEnabled,
-            dateStatusSyncEnabled,
+            syncToggles,
             setupResult,
             timestamp: Date.now(),
           });
@@ -76,6 +107,9 @@ export async function POST(req: NextRequest) {
           await saveConfig({
             ...nextConfig,
             webhookSyncEnabled: false,
+            webhookCustomFieldSyncEnabled: false,
+            webhookParentStatusSyncEnabled: false,
+            webhookDateStatusSyncEnabled: false,
           });
 
           await appendRun({
@@ -85,10 +119,15 @@ export async function POST(req: NextRequest) {
             error: e?.message,
             selectedListIds: existingListIds,
             syncIntervalMinutes,
-            autoSyncEnabled,
-            webhookSyncEnabled: false,
-            parentStatusSyncEnabled,
-            dateStatusSyncEnabled,
+            syncToggles: {
+              ...syncToggles,
+              webhook: {
+                enabled: false,
+                customFieldSync: false,
+                parentStatusSync: false,
+                dateStatusSync: false,
+              },
+            },
             timestamp: Date.now(),
           });
         }
@@ -101,10 +140,7 @@ export async function POST(req: NextRequest) {
         message: 'SYNC TOGGLES UPDATED',
         selectedListIds: existingListIds,
         syncIntervalMinutes,
-        autoSyncEnabled,
-        webhookSyncEnabled,
-        parentStatusSyncEnabled,
-        dateStatusSyncEnabled,
+        syncToggles,
         timestamp: Date.now(),
       });
 
@@ -151,7 +187,8 @@ export async function POST(req: NextRequest) {
       timestamp: Date.now(),
     });
 
-    if (baseConfig.webhookSyncEnabled !== false) {
+    const baseToggles = getSyncToggles(baseConfig);
+    if (baseToggles.webhook.enabled) {
       try {
         const setupResult = await setupWebhooks(req.nextUrl.origin, selectedListIds, {
           ...baseConfig,

@@ -1,6 +1,7 @@
 import { discoverUpdatedRootTasks, syncParentTasks } from './clickup';
 import type { SyncTotals } from './clickup';
 import { appendRun, getConfig, getStats, saveConfig } from './store';
+import { getSyncToggles } from './sync-toggles';
 
 const DEFAULT_AUTO_SYNC_INTERVAL_MINUTES = 120;
 const MIN_AUTO_SYNC_INTERVAL_MINUTES = 5;
@@ -43,7 +44,7 @@ export function normalizeSyncIntervalMinutes(value: any) {
 }
 
 export function isAutoSyncEnabled(config: any) {
-  return config?.autoSyncEnabled !== false;
+  return getSyncToggles(config).auto.enabled;
 }
 
 function getAutoSyncIntervalMinutes(config: any) {
@@ -262,6 +263,7 @@ export async function runScheduledSync() {
   const requestStartedAt = Date.now();
   const config = await getConfig();
   const stats = await getStats();
+  const syncToggles = getSyncToggles(config);
   const schedule = getScheduleSummary(config, stats);
   const runningState = getRunningAutoSync(config);
 
@@ -370,6 +372,9 @@ export async function runScheduledSync() {
       const batchResult = await syncParentTasks(batch, {
         concurrency: AUTO_SYNC_CONCURRENCY,
         includeDetails: false,
+        includeCustomFieldSync: syncToggles.auto.customFieldSync,
+        includeParentStatusSync: syncToggles.auto.parentStatusSync,
+        includeDateStatusSync: syncToggles.auto.dateStatusSync,
       });
 
       const totals = state.totals || emptyTotals();

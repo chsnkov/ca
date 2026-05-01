@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { appendRun, getConfig, saveConfig } from '../../../lib/store';
 import { createManualSyncState, manualSyncStateToResult, runManualSyncChunk } from '../../../lib/clickup';
+import { getSyncToggles } from '../../../lib/sync-toggles';
 
 export async function POST(req: NextRequest) {
   const cookieAuth = req.cookies.get('ca_auth')?.value === '1';
@@ -42,10 +43,11 @@ export async function POST(req: NextRequest) {
       return NextResponse.redirect(new URL('/?error=no_list_configured', req.url), { status: 303 });
     }
 
+    const syncToggles = getSyncToggles(config);
     const options = {
-      includeCustomFieldSync: config?.autoSyncEnabled !== false,
-      includeParentStatusSync: config?.parentStatusSyncEnabled !== false,
-      includeDateStatusSync: config?.dateStatusSyncEnabled !== false,
+      includeCustomFieldSync: syncToggles.auto.customFieldSync,
+      includeParentStatusSync: syncToggles.auto.parentStatusSync,
+      includeDateStatusSync: syncToggles.auto.dateStatusSync,
     };
     const initialState = config?.manualSync?.status === 'running'
       ? config.manualSync

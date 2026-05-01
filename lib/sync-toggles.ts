@@ -1,0 +1,68 @@
+type SyncToggleSection = {
+  enabled: boolean;
+  customFieldSync: boolean;
+  parentStatusSync: boolean;
+  dateStatusSync: boolean;
+};
+
+export type SyncToggles = {
+  auto: SyncToggleSection;
+  webhook: SyncToggleSection;
+};
+
+function bool(value: any, fallback: boolean) {
+  return value === undefined || value === null ? fallback : value !== false;
+}
+
+function effectiveSection(master: boolean, customFieldSync: boolean, parentStatusSync: boolean, dateStatusSync: boolean) {
+  if (!master || (!customFieldSync && !parentStatusSync && !dateStatusSync)) {
+    return {
+      enabled: false,
+      customFieldSync: false,
+      parentStatusSync: false,
+      dateStatusSync: false,
+    };
+  }
+
+  return {
+    enabled: true,
+    customFieldSync,
+    parentStatusSync,
+    dateStatusSync,
+  };
+}
+
+export function getSyncToggles(config: any): SyncToggles {
+  const autoMaster = bool(config?.autoSyncEnabled, true);
+  const webhookMaster = bool(config?.webhookSyncEnabled, true);
+  const legacyParentStatus = bool(config?.parentStatusSyncEnabled, true);
+  const legacyDateStatus = bool(config?.dateStatusSyncEnabled, true);
+
+  return {
+    auto: effectiveSection(
+      autoMaster,
+      bool(config?.autoSyncCustomFieldSyncEnabled, autoMaster),
+      bool(config?.autoSyncParentStatusSyncEnabled, legacyParentStatus),
+      bool(config?.autoSyncDateStatusSyncEnabled, legacyDateStatus),
+    ),
+    webhook: effectiveSection(
+      webhookMaster,
+      bool(config?.webhookCustomFieldSyncEnabled, webhookMaster),
+      bool(config?.webhookParentStatusSyncEnabled, legacyParentStatus),
+      bool(config?.webhookDateStatusSyncEnabled, legacyDateStatus),
+    ),
+  };
+}
+
+export function flattenSyncToggles(toggles: SyncToggles) {
+  return {
+    autoSyncEnabled: toggles.auto.enabled,
+    autoSyncCustomFieldSyncEnabled: toggles.auto.customFieldSync,
+    autoSyncParentStatusSyncEnabled: toggles.auto.parentStatusSync,
+    autoSyncDateStatusSyncEnabled: toggles.auto.dateStatusSync,
+    webhookSyncEnabled: toggles.webhook.enabled,
+    webhookCustomFieldSyncEnabled: toggles.webhook.customFieldSync,
+    webhookParentStatusSyncEnabled: toggles.webhook.parentStatusSync,
+    webhookDateStatusSyncEnabled: toggles.webhook.dateStatusSync,
+  };
+}

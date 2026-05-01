@@ -7,6 +7,7 @@ import {
   verifyWebhook,
 } from '../../../lib/clickup';
 import { getConfig, appendRun } from '../../../lib/store';
+import { getSyncToggles } from '../../../lib/sync-toggles';
 
 function isDateRelevantTaskUpdate(body: any) {
   if (body?.event !== 'taskUpdated') return false;
@@ -44,8 +45,9 @@ export async function POST(req: NextRequest) {
     const event = body.event;
     const taskId = body.task_id;
     const isDateUpdateEvent = isDateRelevantTaskUpdate(body);
+    const syncToggles = getSyncToggles(config);
 
-    if (config?.webhookSyncEnabled === false) {
+    if (!syncToggles.webhook.enabled) {
       await appendRun({
         type: 'webhook',
         message: 'WEBHOOK SYNC: ignored (disabled)',
@@ -103,12 +105,16 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ ok: true, ignored: 'root_task_date_update' });
       }
 
-      const result = await syncParentTask(String(task.id));
+      const result = syncToggles.webhook.customFieldSync
+        ? await syncParentTask(String(task.id))
+        : { updated: 0, skipped: 0, ignored: 1, errors: 0, reason: 'webhook_custom_field_sync_disabled' };
 
       await appendRun({
         type: 'webhook',
-        message: 'WEBHOOK SYNC: parent task synced',
-        action: 'synced_parent_task',
+        message: syncToggles.webhook.customFieldSync
+          ? 'WEBHOOK SYNC: parent task synced'
+          : 'WEBHOOK SYNC: parent task ignored (custom field disabled)',
+        action: syncToggles.webhook.customFieldSync ? 'synced_parent_task' : 'ignored_parent_task_custom_field_disabled',
         taskId,
         taskListId,
         taskName: task.name,
@@ -121,7 +127,7 @@ export async function POST(req: NextRequest) {
     }
 
     const parentId = String(task.parent);
-    const dateStatusResult = config?.dateStatusSyncEnabled === false
+    const dateStatusResult = !syncToggles.webhook.dateStatusSync
       ? {
           updated: 0,
           skipped: 0,
@@ -132,7 +138,7 @@ export async function POST(req: NextRequest) {
         }
       : await syncTaskStatusFromDates(task);
 
-    if (isDateUpdateEvent && config?.dateStatusSyncEnabled === false) {
+    if (isDateUpdateEvent && !syncToggles.webhook.dateStatusSync) {
       await appendRun({
         type: 'webhook',
         message: 'DATE STATUS SYNC: ignored (disabled)',
@@ -150,28 +156,25 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: true, ignored: 'date_status_sync_disabled', dateStatusResult });
     }
 
-    const shouldSyncParent = event === 'taskStatusUpdated' || dateStatusResult.updated > 0;
-    const result = shouldSyncParent
+    const statusMayHaveChanged = event === 'taskStatusUpdated' || dateStatusResult.updated > 0;
+    const result = statusMayHaveChanged && syncToggles.webhook.customFieldSync
       ? await syncParentTask(parentId)
-      : { updated: 0, skipped: 0, ignored: 1, errors: 0, reason: 'parent_sync_not_needed' };
-    const parentStatusResult = shouldSyncParent
-      ? config?.parentStatusSyncEnabled === false
-        ? {
-            updated: 0,
-            skipped: 0,
-            ignored: 1,
-            errors: 0,
-            parentId,
-            reason: 'parent_status_sync_disabled',
-          }
-        : await syncParentStatusFromSubtasks(parentId)
+      : {
+          updated: 0,
+          skipped: 0,
+          ignored: 1,
+          errors: 0,
+          reason: statusMayHaveChanged ? 'webhook_custom_field_sync_disabled' : 'parent_sync_not_needed',
+        };
+    const parentStatusResult = statusMayHaveChanged && syncToggles.webhook.parentStatusSync
+      ? await syncParentStatusFromSubtasks(parentId)
       : {
           updated: 0,
           skipped: 0,
           ignored: 1,
           errors: 0,
           parentId,
-          reason: 'parent_status_sync_not_needed',
+          reason: statusMayHaveChanged ? 'webhook_parent_status_sync_disabled' : 'parent_status_sync_not_needed',
         };
 
     await appendRun({

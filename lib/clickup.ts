@@ -722,17 +722,20 @@ export async function syncParentTasks(
     includeDetails?: boolean;
     includeCustomFieldSync?: boolean;
     includeParentStatusSync?: boolean;
+    includeDateStatusSync?: boolean;
     onProgress?: (processed: number, total: number) => void;
   } = {},
 ) {
   const totals = createTotals();
   const customFieldTotals = createTotals();
   const parentStatusTotals = createTotals();
+  const dateStatusTotals = createTotals();
   const fieldCache = options.fieldCache || new Map<string, any[]>();
   const concurrency = Math.max(1, Math.min(options.concurrency || 4, taskIds.length || 1));
   const includeDetails = options.includeDetails !== false;
   const includeCustomFieldSync = options.includeCustomFieldSync !== false;
   const includeParentStatusSync = options.includeParentStatusSync === true;
+  const includeDateStatusSync = options.includeDateStatusSync === true;
   let nextIndex = 0;
   let processed = 0;
 
@@ -740,7 +743,23 @@ export async function syncParentTasks(
     while (nextIndex < taskIds.length) {
       const taskId = taskIds[nextIndex++];
       try {
-        const parent: ClickUpTask & { subtasks?: ClickUpTask[] } = await getTask(taskId);
+        let parent: ClickUpTask & { subtasks?: ClickUpTask[] } = await getTask(taskId);
+
+        if (includeDateStatusSync) {
+          const subtasks = parent.subtasks || [];
+          let dateUpdatesForParent = 0;
+          for (const subtask of subtasks) {
+            const result = await syncTaskStatusFromDates(subtask);
+            dateUpdatesForParent += result.updated || 0;
+            addTotals(dateStatusTotals, result, false);
+          }
+
+          if (dateUpdatesForParent > 0 && (includeCustomFieldSync || includeParentStatusSync)) {
+            parent = await getTask(taskId);
+          }
+        } else {
+          dateStatusTotals.ignored += 1;
+        }
 
         if (includeCustomFieldSync) {
           const result = await syncParentTaskFromTask(parent, fieldCache);
@@ -769,10 +788,13 @@ export async function syncParentTasks(
 
   await Promise.all(Array.from({ length: concurrency }, worker));
   addTotals(totals, customFieldTotals, includeDetails);
+  addTotals(totals, parentStatusTotals, includeDetails);
+  addTotals(totals, dateStatusTotals, includeDetails);
   return {
     ...totals,
     customFieldResult: customFieldTotals,
     parentStatusResult: parentStatusTotals,
+    dateStatusResult: dateStatusTotals,
   };
 }
 
@@ -1025,6 +1047,7 @@ export async function syncLists(listIds: string[], options: FullSyncOptions = {}
     ...createTotals(),
     customFieldResult: createTotals(),
     parentStatusResult: createTotals(),
+    dateStatusResult: createTotals(),
   };
   let dateStatusResult: Required<SyncTotals> | null = null;
   let dateStatusDiscovery: any[] = [];
