@@ -1,9 +1,10 @@
 // Status-activity capture (independent of the sync engine).
 //
-// Logs every Animation subtask transition INTO a target status (default
-// "to check") as a task in a dedicated reporting list, so a native ClickUp
-// dashboard can count EVERY submission — including re-submissions after fixes,
-// which the historical time_in_status API collapses.
+// Logs EVERY status change of Animation subtasks as a task in a dedicated
+// reporting list (the Status field holds the new status), so a native ClickUp
+// dashboard can count every transition — including re-submissions after fixes,
+// which the historical time_in_status API collapses. Optionally restrict to
+// specific statuses via STATUS_ACTIVITY_STATUSES (comma-separated); empty = all.
 //
 // Task name = the shot (parent task name). Assignee = the subtask's assignee
 // (falls back to the actor who made the change, then to unassigned).
@@ -12,8 +13,14 @@ const API = 'https://api.clickup.com/api/v2';
 
 const REPORT_LIST_ID = () => process.env.STATUS_ACTIVITY_LIST_ID || '901819282141';
 const ROBOTON_FOLDER_ID = () => process.env.STATUS_ACTIVITY_FOLDER_ID || '90189683135';
-const TARGET_STATUS = () => (process.env.STATUS_ACTIVITY_STATUS || 'to check').toLowerCase();
 const ANIMATION_ITEM_ID = () => Number(process.env.STATUS_ACTIVITY_ITEM_ID || '1003');
+
+// Optional comma-separated allowlist of statuses to track. Empty => track ALL.
+function statusAllowlist(): Set<string> | null {
+  const raw = process.env.STATUS_ACTIVITY_STATUSES;
+  if (!raw) return null;
+  return new Set(raw.split(',').map((s) => s.trim().toLowerCase()).filter(Boolean));
+}
 const STATUS_FIELD_NAME = 'Status';
 
 function token() {
@@ -83,8 +90,11 @@ async function statusFieldId(): Promise<string> {
  * report task (named after the shot) to the reporting list.
  */
 export async function logStatusActivity(taskId: string, newStatus: string, actorId?: number) {
-  if (String(newStatus).toLowerCase() !== TARGET_STATUS()) {
-    return { ignored: 'not_target_status' };
+  const status = String(newStatus || '').trim();
+  if (!status) return { ignored: 'no_status' };
+  const allow = statusAllowlist();
+  if (allow && !allow.has(status.toLowerCase())) {
+    return { ignored: 'status_not_tracked' };
   }
   const task = await req(`/task/${taskId}`);
   if (Number(task?.custom_item_id) !== ANIMATION_ITEM_ID()) {
@@ -108,7 +118,7 @@ export async function logStatusActivity(taskId: string, newStatus: string, actor
     name: shot,
     due_date: Date.now(),
     due_date_time: false,
-    custom_fields: [{ id: fieldId, value: TARGET_STATUS() }],
+    custom_fields: [{ id: fieldId, value: status }],
   };
   if (assigneeId) body.assignees = [Number(assigneeId)];
 
