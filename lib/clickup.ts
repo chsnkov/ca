@@ -24,12 +24,14 @@ type ClickUpTask = {
   due_date?: string | number | null;
   date_updated?: string | number | null;
   custom_fields?: any[];
+  custom_item_id?: number | null;
 };
 
 type FullSyncOptions = {
   includeCustomFieldSync?: boolean;
   includeParentStatusSync?: boolean;
   includeDateStatusSync?: boolean;
+  includePipelineSync?: boolean;
   mode?: 'smart' | 'bruteForce';
   updatedAfter?: string | null;
 };
@@ -53,6 +55,7 @@ export type ManualSyncState = {
   customFieldResult: Required<SyncTotals>;
   parentStatusResult: Required<SyncTotals>;
   dateStatusResult: Required<SyncTotals>;
+  pipelineResult: Required<SyncTotals>;
   lastChunk?: {
     stage: 'dateStatus' | 'parents' | 'done';
     processed: number;
@@ -388,6 +391,135 @@ async function updateTaskStatus(taskId: string, status: string) {
     method: 'PUT',
     body: JSON.stringify({ status }),
   });
+}
+
+// --------------------------------------------------------------------------- //
+// Pipeline stage promotion (ClickUp-internal: predecessor COMPLETE -> successor
+// gets ACTION NEEDED). Independent of the Deadline render sync; the only action
+// is PLANNED -> ACTION NEEDED, guarded so it is idempotent and never rolls a
+// stage back. Chain (FX optional):
+//   Layout -> Animation -> [FX] -> Shot Assembly -> Render
+// Layout and Animation are never promoted automatically (manual entry points).
+// --------------------------------------------------------------------------- //
+const PIPELINE_ACTION_NEEDED_WRITE = 'action needed';
+const PIPELINE_STATUS_PLANNED = 'PLANNED';
+const PIPELINE_STATUS_COMPLETE = 'COMPLETE';
+
+type PipelineStage = 'layout' | 'animation' | 'fx' | 'shot assembly' | 'render';
+
+// custom_item_id is the stable identity of each stage subtask (name casing
+// varies: 'Fx' vs 'FX', 'Render' vs 'render'); name is the fallback.
+const PIPELINE_STAGE_BY_CIID: Record<number, PipelineStage> = {
+  1006: 'layout',
+  1003: 'animation',
+  1008: 'fx',
+  1005: 'shot assembly',
+  1004: 'render',
+};
+const PIPELINE_STAGE_BY_NAME: Record<string, PipelineStage> = {
+  layout: 'layout',
+  animation: 'animation',
+  fx: 'fx',
+  'shot assembly': 'shot assembly',
+  render: 'render',
+};
+
+function getPipelineStage(sub: ClickUpTask): PipelineStage | null {
+  const ciid = sub.custom_item_id;
+  if (ciid !== undefined && ciid !== null && PIPELINE_STAGE_BY_CIID[Number(ciid)]) {
+    return PIPELINE_STAGE_BY_CIID[Number(ciid)];
+  }
+  return PIPELINE_STAGE_BY_NAME[norm(sub.name)] || null;
+}
+
+type PipelinePromotion = { subtaskId: string; stage: PipelineStage; from: string };
+
+export function decidePipelinePromotions(subtasks: ClickUpTask[]): PipelinePromotion[] {
+  const stages: Partial<Record<PipelineStage, { id: string; status: string }>> = {};
+  for (const sub of subtasks) {
+    const stage = getPipelineStage(sub);
+    if (!stage || stages[stage]) continue; // first wins
+    stages[stage] = { id: String(sub.id), status: sub.status?.status || '' };
+  }
+
+  const present = (stage: PipelineStage) => Boolean(stages[stage]);
+  const st = (stage: PipelineStage) => normStatus(stages[stage]?.status);
+  const promotions: PipelinePromotion[] = [];
+  const promote = (stage: PipelineStage) => {
+    const cur = stages[stage];
+    if (cur) promotions.push({ subtaskId: cur.id, stage, from: cur.status });
+  };
+
+  // FX: promoted when Animation is COMPLETE (only if FX exists and is still PLANNED).
+  if (present('fx') && st('fx') === PIPELINE_STATUS_PLANNED && st('animation') === PIPELINE_STATUS_COMPLETE) {
+    promote('fx');
+  }
+
+  // Shot Assembly: predecessor is FX when the shot has FX, otherwise Animation.
+  const assemblyPredecessorComplete = present('fx')
+    ? st('fx') === PIPELINE_STATUS_COMPLETE
+    : st('animation') === PIPELINE_STATUS_COMPLETE;
+  if (present('shot assembly') && st('shot assembly') === PIPELINE_STATUS_PLANNED && assemblyPredecessorComplete) {
+    promote('shot assembly');
+  }
+
+  // Render: promoted when Shot Assembly is COMPLETE.
+  if (present('render') && st('render') === PIPELINE_STATUS_PLANNED && st('shot assembly') === PIPELINE_STATUS_COMPLETE) {
+    promote('render');
+  }
+
+  return promotions;
+}
+
+async function promotePipelineStagesFromTask(parent: ClickUpTask & { subtasks?: ClickUpTask[] }) {
+  const parentId = String(parent.id);
+  if (parent.parent) {
+    return { updated: 0, skipped: 0, ignored: 1, errors: 0, details: [], parentId, reason: 'not_root_task' };
+  }
+
+  const firstLevelSubtasks = (parent.subtasks || []).filter((subtask) => String(subtask.parent || '') === parentId);
+  const promotions = decidePipelinePromotions(firstLevelSubtasks);
+
+  if (!promotions.length) {
+    return { updated: 0, skipped: 0, ignored: 1, errors: 0, details: [], parentId, reason: 'no_pipeline_promotions' };
+  }
+
+  let updated = 0;
+  let errors = 0;
+  const details: any[] = [];
+
+  for (const promotion of promotions) {
+    try {
+      await updateTaskStatus(promotion.subtaskId, PIPELINE_ACTION_NEEDED_WRITE);
+      updated += 1;
+      details.push({
+        parentId,
+        parentName: parent.name,
+        subtaskId: promotion.subtaskId,
+        stage: promotion.stage,
+        from: promotion.from,
+        to: PIPELINE_ACTION_NEEDED_WRITE,
+        action: 'promoted_to_action_needed',
+      });
+    } catch (error: any) {
+      errors += 1;
+      details.push({
+        parentId,
+        parentName: parent.name,
+        subtaskId: promotion.subtaskId,
+        stage: promotion.stage,
+        action: 'error',
+        error: error?.message || String(error),
+      });
+    }
+  }
+
+  return { updated, skipped: 0, ignored: 0, errors, details, parentId };
+}
+
+export async function promotePipelineStages(parentId: string) {
+  const parent: ClickUpTask & { subtasks?: ClickUpTask[] } = await getTask(parentId);
+  return promotePipelineStagesFromTask(parent);
 }
 
 export async function syncParentStatusFromSubtasks(parentId: string) {
@@ -730,6 +862,7 @@ export async function syncParentTasks(
     includeCustomFieldSync?: boolean;
     includeParentStatusSync?: boolean;
     includeDateStatusSync?: boolean;
+    includePipelineSync?: boolean;
     onProgress?: (processed: number, total: number) => void;
   } = {},
 ) {
@@ -737,12 +870,14 @@ export async function syncParentTasks(
   const customFieldTotals = createTotals();
   const parentStatusTotals = createTotals();
   const dateStatusTotals = createTotals();
+  const pipelineTotals = createTotals();
   const fieldCache = options.fieldCache || new Map<string, any[]>();
   const concurrency = Math.max(1, Math.min(options.concurrency || 4, taskIds.length || 1));
   const includeDetails = options.includeDetails !== false;
   const includeCustomFieldSync = options.includeCustomFieldSync !== false;
   const includeParentStatusSync = options.includeParentStatusSync === true;
   const includeDateStatusSync = options.includeDateStatusSync === true;
+  const includePipelineSync = options.includePipelineSync === true;
   let nextIndex = 0;
   let processed = 0;
 
@@ -761,11 +896,23 @@ export async function syncParentTasks(
             addTotals(dateStatusTotals, result, false);
           }
 
-          if (dateUpdatesForParent > 0 && (includeCustomFieldSync || includeParentStatusSync)) {
+          if (dateUpdatesForParent > 0 && (includeCustomFieldSync || includeParentStatusSync || includePipelineSync)) {
             parent = await getTask(taskId);
           }
         } else {
           dateStatusTotals.ignored += 1;
+        }
+
+        // Pipeline promotion first so the custom-field mirror below reflects any
+        // PLANNED -> ACTION NEEDED it makes in the same pass.
+        if (includePipelineSync) {
+          const result = await promotePipelineStagesFromTask(parent);
+          addTotals(pipelineTotals, result, includeDetails);
+          if ((result.updated || 0) > 0 && (includeCustomFieldSync || includeParentStatusSync)) {
+            parent = await getTask(taskId);
+          }
+        } else {
+          pipelineTotals.ignored += 1;
         }
 
         if (includeCustomFieldSync) {
@@ -797,11 +944,13 @@ export async function syncParentTasks(
   addTotals(totals, customFieldTotals, includeDetails);
   addTotals(totals, parentStatusTotals, includeDetails);
   addTotals(totals, dateStatusTotals, includeDetails);
+  addTotals(totals, pipelineTotals, includeDetails);
   return {
     ...totals,
     customFieldResult: customFieldTotals,
     parentStatusResult: parentStatusTotals,
     dateStatusResult: dateStatusTotals,
+    pipelineResult: pipelineTotals,
   };
 }
 
@@ -888,27 +1037,33 @@ function normalizeFullSyncOptions(options: FullSyncOptions): Required<FullSyncOp
     includeCustomFieldSync: options.includeCustomFieldSync !== false,
     includeParentStatusSync: options.includeParentStatusSync === true,
     includeDateStatusSync: options.includeDateStatusSync === true,
+    includePipelineSync: options.includePipelineSync === true,
     mode: options.mode === 'smart' ? 'smart' : 'bruteForce',
     updatedAfter,
   };
 }
 
+function manualSyncNeedsParentPhase(options: ManualSyncState['options']) {
+  return Boolean(options.includeCustomFieldSync || options.includeParentStatusSync || options.includePipelineSync);
+}
+
 function manualSyncDone(state: ManualSyncState) {
   const dateDone = !state.options.includeDateStatusSync || state.subtaskCursorIndex >= state.subtaskIds.length;
   const parentsDone =
-    (!state.options.includeCustomFieldSync && !state.options.includeParentStatusSync) ||
+    !manualSyncNeedsParentPhase(state.options) ||
     state.rootCursorIndex >= state.rootTaskIds.length;
   return dateDone && parentsDone;
 }
 
 function manualSyncProgress(state: ManualSyncState) {
+  const needsParents = manualSyncNeedsParentPhase(state.options);
   const total = (
     (state.options.includeDateStatusSync ? state.subtaskIds.length : 0) +
-    (state.options.includeCustomFieldSync || state.options.includeParentStatusSync ? state.rootTaskIds.length : 0)
+    (needsParents ? state.rootTaskIds.length : 0)
   );
   const processed = (
     (state.options.includeDateStatusSync ? state.subtaskCursorIndex : 0) +
-    (state.options.includeCustomFieldSync || state.options.includeParentStatusSync ? state.rootCursorIndex : 0)
+    (needsParents ? state.rootCursorIndex : 0)
   );
 
   return { processed, total, remaining: Math.max(0, total - processed) };
@@ -927,7 +1082,7 @@ export async function createManualSyncState(listIds: string[], options: FullSync
     dateStatusDiscovery = subtaskDiscovery.discovery;
   }
 
-  if (normalizedOptions.includeCustomFieldSync || normalizedOptions.includeParentStatusSync) {
+  if (manualSyncNeedsParentPhase(normalizedOptions)) {
     const rootDiscovery = await discoverUpdatedRootTasks(listIds, normalizedOptions.updatedAfter);
     rootTaskIds = rootDiscovery.taskIds;
     discovery = rootDiscovery.discovery;
@@ -949,6 +1104,7 @@ export async function createManualSyncState(listIds: string[], options: FullSync
     customFieldResult: createTotals(),
     parentStatusResult: createTotals(),
     dateStatusResult: createTotals(),
+    pipelineResult: createTotals(),
   };
 }
 
@@ -961,6 +1117,7 @@ export async function runManualSyncChunk(state: ManualSyncState) {
     customFieldResult: cloneTotals(state.customFieldResult),
     parentStatusResult: cloneTotals(state.parentStatusResult),
     dateStatusResult: cloneTotals(state.dateStatusResult),
+    pipelineResult: cloneTotals(state.pipelineResult),
   };
 
   if (nextState.options.includeDateStatusSync && nextState.subtaskCursorIndex < nextState.subtaskIds.length) {
@@ -975,7 +1132,7 @@ export async function runManualSyncChunk(state: ManualSyncState) {
       finishedAt: new Date().toISOString(),
     };
   } else if (
-    (nextState.options.includeCustomFieldSync || nextState.options.includeParentStatusSync) &&
+    manualSyncNeedsParentPhase(nextState.options) &&
     nextState.rootCursorIndex < nextState.rootTaskIds.length
   ) {
     const chunk = nextState.rootTaskIds.slice(nextState.rootCursorIndex, nextState.rootCursorIndex + chunkSize);
@@ -984,9 +1141,11 @@ export async function runManualSyncChunk(state: ManualSyncState) {
       includeDetails: false,
       includeCustomFieldSync: nextState.options.includeCustomFieldSync,
       includeParentStatusSync: nextState.options.includeParentStatusSync,
+      includePipelineSync: nextState.options.includePipelineSync,
     });
     addTotals(nextState.customFieldResult, result.customFieldResult, false);
     addTotals(nextState.parentStatusResult, result.parentStatusResult, false);
+    addTotals(nextState.pipelineResult, result.pipelineResult, false);
     nextState.rootCursorIndex += chunk.length;
     nextState.lastChunk = {
       stage: 'parents',
@@ -1007,6 +1166,7 @@ export async function runManualSyncChunk(state: ManualSyncState) {
   addTotals(nextState.totals, nextState.customFieldResult, false);
   addTotals(nextState.totals, nextState.parentStatusResult, false);
   addTotals(nextState.totals, nextState.dateStatusResult, false);
+  addTotals(nextState.totals, nextState.pipelineResult, false);
 
   if (manualSyncDone(nextState)) {
     nextState.status = 'idle';
@@ -1036,6 +1196,7 @@ export function manualSyncStateToResult(state: ManualSyncState) {
     customFieldResult: state.customFieldResult,
     parentStatusResult: state.parentStatusResult,
     dateStatusResult: state.options.includeDateStatusSync ? state.dateStatusResult : null,
+    pipelineResult: state.pipelineResult,
     discovery: state.discovery,
     dateStatusDiscovery: state.dateStatusDiscovery,
     options: state.options,
@@ -1051,7 +1212,8 @@ export async function syncLists(listIds: string[], options: FullSyncOptions = {}
   const includeCustomFieldSync = options.includeCustomFieldSync !== false;
   const includeParentStatusSync = options.includeParentStatusSync === true;
   const includeDateStatusSync = options.includeDateStatusSync === true;
-  console.log('[syncLists] start', { listIds, startedAt, includeCustomFieldSync, includeParentStatusSync, includeDateStatusSync });
+  const includePipelineSync = options.includePipelineSync === true;
+  console.log('[syncLists] start', { listIds, startedAt, includeCustomFieldSync, includeParentStatusSync, includeDateStatusSync, includePipelineSync });
 
   let taskIds: string[] = [];
   let discovery: any[] = [];
@@ -1060,6 +1222,7 @@ export async function syncLists(listIds: string[], options: FullSyncOptions = {}
     customFieldResult: createTotals(),
     parentStatusResult: createTotals(),
     dateStatusResult: createTotals(),
+    pipelineResult: createTotals(),
   };
   let dateStatusResult: Required<SyncTotals> | null = null;
   let dateStatusDiscovery: any[] = [];
@@ -1083,7 +1246,7 @@ export async function syncLists(listIds: string[], options: FullSyncOptions = {}
     });
   }
 
-  if (includeCustomFieldSync || includeParentStatusSync) {
+  if (includeCustomFieldSync || includeParentStatusSync || includePipelineSync) {
     const rootDiscovery = await discoverUpdatedRootTasks(listIds, null);
     taskIds = rootDiscovery.taskIds;
     discovery = rootDiscovery.discovery;
@@ -1099,6 +1262,7 @@ export async function syncLists(listIds: string[], options: FullSyncOptions = {}
       concurrency: 4,
       includeCustomFieldSync,
       includeParentStatusSync,
+      includePipelineSync,
       onProgress(processed, total) {
         if (processed % 25 === 0 || processed === total) {
           console.log('[syncLists] progress', { processed, total, elapsedMs: Date.now() - Date.parse(startedAt) });
@@ -1125,6 +1289,7 @@ export async function syncLists(listIds: string[], options: FullSyncOptions = {}
       includeCustomFieldSync,
       includeParentStatusSync,
       includeDateStatusSync,
+      includePipelineSync,
     },
     dateStatusResult,
     dateStatusDiscovery,

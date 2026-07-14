@@ -95,7 +95,8 @@ function Dashboard({
   const manualSyncCanRun = Boolean(
     syncToggles.manual.customFieldSync ||
     syncToggles.manual.parentStatusSync ||
-    syncToggles.manual.dateStatusSync,
+    syncToggles.manual.dateStatusSync ||
+    syncToggles.manual.pipelineSync,
   );
   const manualSyncProgress = manualSync?.status === 'running'
     ? (() => {
@@ -327,6 +328,16 @@ function Dashboard({
                       />
                       <span>Date based status sync</span>
                     </label>
+                    <label style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                      <input
+                        name={`${prefix}PipelineSyncEnabled`}
+                        type="checkbox"
+                        defaultChecked={section.pipelineSync}
+                        disabled={!section.enabled}
+                        data-sync-child={prefix}
+                      />
+                      <span>Pipeline stage sync</span>
+                    </label>
                   </div>
                 </div>
               ))}
@@ -376,6 +387,14 @@ function Dashboard({
                       defaultChecked={syncToggles.manual.dateStatusSync}
                     />
                     <span>Date based status sync</span>
+                  </label>
+                  <label style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                    <input
+                      name="manualSyncPipelineSyncEnabled"
+                      type="checkbox"
+                      defaultChecked={syncToggles.manual.pipelineSync}
+                    />
+                    <span>Pipeline stage sync</span>
                   </label>
                 </div>
                 <div>

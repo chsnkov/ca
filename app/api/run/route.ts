@@ -84,6 +84,7 @@ export async function POST(req: NextRequest) {
       includeCustomFieldSync: syncToggles.manual.customFieldSync,
       includeParentStatusSync: syncToggles.manual.parentStatusSync,
       includeDateStatusSync: syncToggles.manual.dateStatusSync,
+      includePipelineSync: syncToggles.manual.pipelineSync,
       mode: syncToggles.manual.mode,
       updatedAfter: manualUpdatedAfter,
     };

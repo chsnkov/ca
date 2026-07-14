@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import {
   getTask,
+  promotePipelineStages,
   syncParentStatusFromSubtasks,
   syncParentTask,
   syncTaskStatusFromDates,
@@ -109,6 +110,10 @@ export async function POST(req: NextRequest) {
         ? await syncParentTask(String(task.id))
         : { updated: 0, skipped: 0, ignored: 1, errors: 0, reason: 'webhook_custom_field_sync_disabled' };
 
+      const pipelineResult = syncToggles.webhook.pipelineSync
+        ? await promotePipelineStages(String(task.id))
+        : { updated: 0, skipped: 0, ignored: 1, errors: 0, reason: 'webhook_pipeline_sync_disabled' };
+
       await appendRun({
         type: 'webhook',
         message: syncToggles.webhook.customFieldSync
@@ -120,10 +125,11 @@ export async function POST(req: NextRequest) {
         taskName: task.name,
         status: task.status?.status,
         result,
+        pipelineResult,
         timestamp: Date.now(),
       });
 
-      return NextResponse.json({ ok: true, parentSynced: String(task.id), result });
+      return NextResponse.json({ ok: true, parentSynced: String(task.id), result, pipelineResult });
     }
 
     const parentId = String(task.parent);
@@ -176,6 +182,16 @@ export async function POST(req: NextRequest) {
           parentId,
           reason: statusMayHaveChanged ? 'webhook_parent_status_sync_disabled' : 'parent_status_sync_not_needed',
         };
+    const pipelineResult = statusMayHaveChanged && syncToggles.webhook.pipelineSync
+      ? await promotePipelineStages(parentId)
+      : {
+          updated: 0,
+          skipped: 0,
+          ignored: 1,
+          errors: 0,
+          parentId,
+          reason: statusMayHaveChanged ? 'webhook_pipeline_sync_disabled' : 'pipeline_sync_not_needed',
+        };
 
     await appendRun({
       type: 'webhook',
@@ -190,6 +206,7 @@ export async function POST(req: NextRequest) {
       dateStatusResult,
       result,
       parentStatusResult,
+      pipelineResult,
       timestamp: Date.now(),
     });
 
@@ -199,6 +216,7 @@ export async function POST(req: NextRequest) {
       dateStatusResult,
       result,
       parentStatusResult,
+      pipelineResult,
     });
   } catch (err: any) {
     await appendRun({

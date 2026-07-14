@@ -19,6 +19,7 @@ function formToggleSection(form: FormData, prefix: 'autoSync' | 'webhook') {
   const customFieldSync = isChecked(form.get(`${prefix}CustomFieldSyncEnabled`));
   const parentStatusSync = isChecked(form.get(`${prefix}ParentStatusSyncEnabled`));
   const dateStatusSync = isChecked(form.get(`${prefix}DateStatusSyncEnabled`));
+  const pipelineSync = isChecked(form.get(`${prefix}PipelineSyncEnabled`));
 
   if (!enabled) {
     return {
@@ -26,15 +27,17 @@ function formToggleSection(form: FormData, prefix: 'autoSync' | 'webhook') {
       customFieldSync: false,
       parentStatusSync: false,
       dateStatusSync: false,
+      pipelineSync: false,
     };
   }
 
-  if (!customFieldSync && !parentStatusSync && !dateStatusSync) {
+  if (!customFieldSync && !parentStatusSync && !dateStatusSync && !pipelineSync) {
     return {
       enabled: true,
       customFieldSync: true,
       parentStatusSync: true,
       dateStatusSync: true,
+      pipelineSync: false,
     };
   }
 
@@ -43,6 +46,7 @@ function formToggleSection(form: FormData, prefix: 'autoSync' | 'webhook') {
     customFieldSync,
     parentStatusSync,
     dateStatusSync,
+    pipelineSync,
   };
 }
 
@@ -52,6 +56,7 @@ function formManualToggleSection(form: FormData) {
     customFieldSync: isChecked(form.get('manualSyncCustomFieldSyncEnabled')),
     parentStatusSync: isChecked(form.get('manualSyncParentStatusSyncEnabled')),
     dateStatusSync: isChecked(form.get('manualSyncDateStatusSyncEnabled')),
+    pipelineSync: isChecked(form.get('manualSyncPipelineSyncEnabled')),
   };
 }
 

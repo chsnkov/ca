@@ -374,6 +374,7 @@ export async function runScheduledSync() {
         includeDetails: false,
         includeCustomFieldSync: syncToggles.auto.customFieldSync,
         includeParentStatusSync: syncToggles.auto.parentStatusSync,
+        includePipelineSync: syncToggles.auto.pipelineSync,
         includeDateStatusSync: syncToggles.auto.dateStatusSync,
       });
 
