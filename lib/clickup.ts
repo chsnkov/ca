@@ -123,6 +123,7 @@ function normStatus(status: unknown) {
 
 const PARENT_STATUS_PLANNED = 'PLANNED';
 const PARENT_STATUS_TO_DO = 'TO DO';
+const PARENT_STATUS_ACTION_NEEDED = 'ACTION NEEDED';
 const PARENT_STATUS_IN_PROGRESS = 'IN PROGRESS';
 const PARENT_STATUS_COMPLETE = 'COMPLETE';
 const PARENT_STATUS_PAUSED = 'PAUSED';
@@ -137,6 +138,7 @@ const PARENT_STATUS_WORKING_STATUSES = new Set([
 const PARENT_STATUS_TRACKED_STATUSES = new Set([
   PARENT_STATUS_PLANNED,
   PARENT_STATUS_TO_DO,
+  PARENT_STATUS_ACTION_NEEDED,
   PARENT_STATUS_IN_PROGRESS,
   PARENT_STATUS_FIX,
   PARENT_STATUS_TO_CHECK,
@@ -184,6 +186,17 @@ function getParentStatusDecision(subtasks: ClickUpTask[]) {
     return {
       desiredStatus: PARENT_STATUS_IN_PROGRESS,
       reason: 'working_subtask_status',
+      counts,
+    };
+  }
+
+  // No stage is actively being worked, but at least one is unblocked and waiting
+  // to be picked up -> surface the shot as ACTION NEEDED (ranks above the passive
+  // planned / to do / paused / complete combinations below).
+  if (counts[PARENT_STATUS_ACTION_NEEDED]) {
+    return {
+      desiredStatus: PARENT_STATUS_ACTION_NEEDED,
+      reason: 'action_needed_subtask_status',
       counts,
     };
   }
