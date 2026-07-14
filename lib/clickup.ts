@@ -413,10 +413,16 @@ async function updateTaskStatus(taskId: string, status: string) {
 // stage back. Chain (FX optional):
 //   Layout -> Animation -> [FX] -> Shot Assembly -> Render
 // Layout and Animation are never promoted automatically (manual entry points).
+// A successor is promotable while it sits in PLANNED or TO DO — TO DO is included
+// so the date-based "TODO" sync (which moves PLANNED -> TO DO once a subtask has
+// start+due dates) cannot pre-empt the promotion. Everything past TO DO is left
+// alone, so the action stays idempotent and never rolls a stage back.
 // --------------------------------------------------------------------------- //
 const PIPELINE_ACTION_NEEDED_WRITE = 'action needed';
 const PIPELINE_STATUS_PLANNED = 'PLANNED';
+const PIPELINE_STATUS_TO_DO = 'TO DO';
 const PIPELINE_STATUS_COMPLETE = 'COMPLETE';
+const PIPELINE_PROMOTABLE_STATUSES = new Set([PIPELINE_STATUS_PLANNED, PIPELINE_STATUS_TO_DO]);
 
 type PipelineStage = 'layout' | 'animation' | 'fx' | 'shot assembly' | 'render';
 
@@ -457,14 +463,15 @@ export function decidePipelinePromotions(subtasks: ClickUpTask[]): PipelinePromo
 
   const present = (stage: PipelineStage) => Boolean(stages[stage]);
   const st = (stage: PipelineStage) => normStatus(stages[stage]?.status);
+  const promotable = (stage: PipelineStage) => PIPELINE_PROMOTABLE_STATUSES.has(st(stage));
   const promotions: PipelinePromotion[] = [];
   const promote = (stage: PipelineStage) => {
     const cur = stages[stage];
     if (cur) promotions.push({ subtaskId: cur.id, stage, from: cur.status });
   };
 
-  // FX: promoted when Animation is COMPLETE (only if FX exists and is still PLANNED).
-  if (present('fx') && st('fx') === PIPELINE_STATUS_PLANNED && st('animation') === PIPELINE_STATUS_COMPLETE) {
+  // FX: promoted when Animation is COMPLETE (only if FX exists and is still promotable).
+  if (present('fx') && promotable('fx') && st('animation') === PIPELINE_STATUS_COMPLETE) {
     promote('fx');
   }
 
@@ -472,12 +479,12 @@ export function decidePipelinePromotions(subtasks: ClickUpTask[]): PipelinePromo
   const assemblyPredecessorComplete = present('fx')
     ? st('fx') === PIPELINE_STATUS_COMPLETE
     : st('animation') === PIPELINE_STATUS_COMPLETE;
-  if (present('shot assembly') && st('shot assembly') === PIPELINE_STATUS_PLANNED && assemblyPredecessorComplete) {
+  if (present('shot assembly') && promotable('shot assembly') && assemblyPredecessorComplete) {
     promote('shot assembly');
   }
 
   // Render: promoted when Shot Assembly is COMPLETE.
-  if (present('render') && st('render') === PIPELINE_STATUS_PLANNED && st('shot assembly') === PIPELINE_STATUS_COMPLETE) {
+  if (present('render') && promotable('render') && st('shot assembly') === PIPELINE_STATUS_COMPLETE) {
     promote('render');
   }
 
