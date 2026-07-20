@@ -1,17 +1,21 @@
 // Status-activity capture (independent of the sync engine).
 //
 // Logs EVERY status change of Animation subtasks as a task in a dedicated
-// reporting list (the Status field holds the new status), so a native ClickUp
-// dashboard can count every transition — including re-submissions after fixes,
-// which the historical time_in_status API collapses. Optionally restrict to
+// reporting list (a tag holds the new status), so a native ClickUp dashboard
+// can count every transition — including re-submissions after fixes, which
+// the historical time_in_status API collapses. Optionally restrict to
 // specific statuses via STATUS_ACTIVITY_STATUSES (comma-separated); empty = all.
+//
+// The status is a TAG (not a custom field): custom fields cannot be created
+// via the API, so a recreated reporting list would need manual UI setup —
+// tags avoid that entirely.
 //
 // Task name = the shot (parent task name). Assignee = the subtask's assignee
 // (falls back to the actor who made the change, then to unassigned).
 
 const API = 'https://api.clickup.com/api/v2';
 
-const REPORT_LIST_ID = () => process.env.STATUS_ACTIVITY_LIST_ID || '901819282141';
+const REPORT_LIST_ID = () => process.env.STATUS_ACTIVITY_LIST_ID || '901819749186';
 const ROBOTON_FOLDER_ID = () => process.env.STATUS_ACTIVITY_FOLDER_ID || '90189683135';
 const ANIMATION_ITEM_ID = () => Number(process.env.STATUS_ACTIVITY_ITEM_ID || '1003');
 
@@ -21,8 +25,6 @@ function statusAllowlist(): Set<string> | null {
   if (!raw) return null;
   return new Set(raw.split(',').map((s) => s.trim().toLowerCase()).filter(Boolean));
 }
-const STATUS_FIELD_NAME = 'Status';
-
 function token() {
   const t = process.env.CLICKUP_TOKEN;
   if (!t) throw new Error('CLICKUP_TOKEN missing');
@@ -75,16 +77,6 @@ export function actorFromWebhook(body: any): number | undefined {
   return id ? Number(id) : undefined;
 }
 
-let statusFieldCache: string | null = null;
-async function statusFieldId(): Promise<string> {
-  if (statusFieldCache) return statusFieldCache;
-  const data = await req(`/list/${REPORT_LIST_ID()}/field`);
-  const f = (data?.fields || []).find((x: any) => x.name === STATUS_FIELD_NAME);
-  if (!f) throw new Error(`custom field "${STATUS_FIELD_NAME}" not found on report list`);
-  statusFieldCache = f.id;
-  return f.id;
-}
-
 /**
  * If `taskId` is an Animation subtask entering the target status, append one
  * report task (named after the shot) to the reporting list.
@@ -113,12 +105,11 @@ export async function logStatusActivity(taskId: string, newStatus: string, actor
   }
 
   const assigneeId = task?.assignees?.[0]?.id ?? actorId;
-  const fieldId = await statusFieldId();
   const body: any = {
     name: shot,
     due_date: Date.now(),
     due_date_time: false,
-    custom_fields: [{ id: fieldId, value: status }],
+    tags: [status.toLowerCase()],
   };
   if (assigneeId) body.assignees = [Number(assigneeId)];
 
