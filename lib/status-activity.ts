@@ -22,10 +22,13 @@ const REPORT_FOLDER_ID = () => process.env.STATUS_ACTIVITY_REPORT_FOLDER_ID || '
 const ROBOTON_FOLDER_ID = () => process.env.STATUS_ACTIVITY_FOLDER_ID || '90189683135';
 const ANIMATION_ITEM_ID = () => Number(process.env.STATUS_ACTIVITY_ITEM_ID || '1003');
 
-// Optional comma-separated allowlist of statuses to track. Empty => track ALL.
+// Comma-separated allowlist of statuses to track. Unset => only "to check"
+// (the owner wants just submissions; other statuses would keep spawning
+// per-status lists in the report folder). Set to "*" to track ALL statuses.
 function statusAllowlist(): Set<string> | null {
   const raw = process.env.STATUS_ACTIVITY_STATUSES;
-  if (!raw) return null;
+  if (!raw) return new Set(['to check']);
+  if (raw.trim() === '*') return null;
   return new Set(raw.split(',').map((s) => s.trim().toLowerCase()).filter(Boolean));
 }
 function token() {
