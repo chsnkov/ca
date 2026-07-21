@@ -6,12 +6,12 @@
 // API collapses. Optionally restrict to specific statuses via
 // STATUS_ACTIVITY_STATUSES (comma-separated); empty = all.
 //
-// Layout: one LIST per status (auto-created inside the report folder), and the
-// animator is a TAG on the task. No assignees at all — assignment requires the
-// member to have access to the list (ITEM_087), and the report folder lives in
-// the owner's private space precisely so animators cannot see it. Tags and
-// lists are also fully API-creatable, so the whole structure can be rebuilt
-// with no manual UI setup.
+// Layout: ONE shared list ("activity", auto-created inside the report folder)
+// holds every event; each task carries two TAGS — the animator and the status.
+// No assignees at all — assignment requires the member to have access to the
+// list (ITEM_087), and the report folder lives in the owner's private space
+// precisely so animators cannot see it. Tags and lists are API-creatable, so
+// the whole structure can be rebuilt with no manual UI setup.
 //
 // Task name = the shot (parent task name).
 
@@ -22,12 +22,10 @@ const REPORT_FOLDER_ID = () => process.env.STATUS_ACTIVITY_REPORT_FOLDER_ID || '
 const ROBOTON_FOLDER_ID = () => process.env.STATUS_ACTIVITY_FOLDER_ID || '90189683135';
 const ANIMATION_ITEM_ID = () => Number(process.env.STATUS_ACTIVITY_ITEM_ID || '1003');
 
-// Comma-separated allowlist of statuses to track. Unset => only "to check"
-// (the owner wants just submissions; other statuses would keep spawning
-// per-status lists in the report folder). Set to "*" to track ALL statuses.
+// Comma-separated allowlist of statuses to track. Set to "*" to track ALL.
 function statusAllowlist(): Set<string> | null {
   const raw = process.env.STATUS_ACTIVITY_STATUSES;
-  if (!raw) return new Set(['to check']);
+  if (!raw) return new Set(['to check', 'in progress']);
   if (raw.trim() === '*') return null;
   return new Set(raw.split(',').map((s) => s.trim().toLowerCase()).filter(Boolean));
 }
@@ -83,31 +81,33 @@ export function actorFromWebhook(body: any): number | undefined {
   return id ? Number(id) : undefined;
 }
 
-// status name (lowercased) -> report list id, resolved/created on demand
-const listCache = new Map<string, string>();
-async function listIdForStatus(status: string): Promise<string> {
-  const key = status.toLowerCase();
-  const hit = listCache.get(key);
-  if (hit) return hit;
+const REPORT_LIST_NAME = 'activity';
+
+// The shared report list, resolved by name in the report folder (created if
+// missing) so the structure self-heals after an accidental deletion.
+let reportListCache: string | null = null;
+async function reportListId(): Promise<string> {
+  if (reportListCache) return reportListCache;
   const data = await req(`/folder/${REPORT_FOLDER_ID()}/list?archived=false`);
-  for (const l of data?.lists || []) {
-    listCache.set(String(l.name).toLowerCase(), String(l.id));
+  const found = (data?.lists || []).find(
+    (l: any) => String(l.name).toLowerCase() === REPORT_LIST_NAME,
+  );
+  if (found) {
+    reportListCache = String(found.id);
+    return reportListCache;
   }
-  const found = listCache.get(key);
-  if (found) return found;
   const created = await req(`/folder/${REPORT_FOLDER_ID()}/list`, {
     method: 'POST',
-    body: JSON.stringify({ name: key }),
+    body: JSON.stringify({ name: REPORT_LIST_NAME }),
   });
-  const id = String(created?.id);
-  listCache.set(key, id);
-  return id;
+  reportListCache = String(created?.id);
+  return reportListCache;
 }
 
 /**
  * If `taskId` is an Animation subtask entering a tracked status, append one
- * report task (named after the shot, tagged with the animator) to the
- * per-status list in the private report folder.
+ * report task (named after the shot, tagged with the animator and the status)
+ * to the shared list in the private report folder.
  */
 export async function logStatusActivity(taskId: string, newStatus: string, _actorId?: number) {
   const status = String(newStatus || '').trim();
@@ -134,17 +134,17 @@ export async function logStatusActivity(taskId: string, newStatus: string, _acto
 
   const who = task?.assignees?.[0];
   const person = String(who?.username || who?.email || 'unassigned').toLowerCase();
-  const listId = await listIdForStatus(status);
+  const listId = await reportListId();
   const created = await req(`/list/${listId}/task`, {
     method: 'POST',
     body: JSON.stringify({
       name: shot,
       due_date: Date.now(),
       due_date_time: false,
-      tags: [person],
+      tags: [person, status.toLowerCase()],
     }),
   });
-  return { logged: created?.id, shot, person, listId };
+  return { logged: created?.id, shot, person, status: status.toLowerCase(), listId };
 }
 
 /** Register a folder-level taskStatusUpdated webhook -> our endpoint (idempotent). */
