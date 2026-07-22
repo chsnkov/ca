@@ -20,6 +20,8 @@ const API = 'https://api.clickup.com/api/v2';
 const REPORT_FOLDER_ID = () => process.env.STATUS_ACTIVITY_REPORT_FOLDER_ID || '90189683135';
 const ROBOTON_FOLDER_ID = () => process.env.STATUS_ACTIVITY_FOLDER_ID || '90189683135';
 const ANIMATION_ITEM_ID = () => Number(process.env.STATUS_ACTIVITY_ITEM_ID || '1003');
+// Custom task type stamped on the report tasks ("Debug").
+const REPORT_ITEM_ID = () => Number(process.env.STATUS_ACTIVITY_REPORT_ITEM_ID || '1012');
 
 // Comma-separated allowlist of statuses to track. Set to "*" to track ALL.
 function statusAllowlist(): Set<string> | null {
@@ -138,6 +140,7 @@ export async function logStatusActivity(taskId: string, newStatus: string, actor
     due_date: Date.now(),
     due_date_time: false,
     tags: [status.toLowerCase()],
+    custom_item_id: REPORT_ITEM_ID(),
   };
   if (assigneeId) body.assignees = [Number(assigneeId)];
 
