@@ -9,9 +9,11 @@
 // Layout: ONE shared list ("activity", auto-created inside the report folder —
 // the Roboton folder itself, so the team's sharing applies and members can be
 // natively assigned). Each event task: name = the shot (parent task name),
-// assignee = the animator, due_date = event day, tag = the status.
-// If an assignee lacks access (ITEM_087) the event is still recorded
-// unassigned rather than lost.
+// assignee = the animator, due_date = event day, and the task's own native
+// STATUS = the recorded status (the list inherits the folder's status set, so
+// "to check"/"in progress" exist there). If the status is unknown to the list
+// the task is created with the default status rather than lost; same for an
+// assignee without access (ITEM_087) — created unassigned.
 
 const API = 'https://api.clickup.com/api/v2';
 
@@ -139,29 +141,37 @@ export async function logStatusActivity(taskId: string, newStatus: string, actor
     name: shot,
     due_date: Date.now(),
     due_date_time: false,
-    tags: [status.toLowerCase()],
+    status: status.toLowerCase(),
     custom_item_id: REPORT_ITEM_ID(),
   };
   if (assigneeId) body.assignees = [Number(assigneeId)];
 
-  try {
-    const created = await req(`/list/${listId}/task`, {
-      method: 'POST',
-      body: JSON.stringify(body),
-    });
-    return { logged: created?.id, shot, assigneeId, status: status.toLowerCase() };
-  } catch (err) {
-    // assignee may lack list access (ITEM_087) -> still record it, unassigned
-    if (body.assignees) {
-      delete body.assignees;
+  // Degrade gracefully rather than lose the event: an assignee may lack list
+  // access (ITEM_087) and a status may not exist in the list's status set.
+  const attempts: Array<(b: any) => void> = [
+    () => {},
+    (b) => delete b.assignees,
+    (b) => delete b.status,
+  ];
+  let lastErr: unknown;
+  for (const strip of attempts) {
+    strip(body);
+    try {
       const created = await req(`/list/${listId}/task`, {
         method: 'POST',
         body: JSON.stringify(body),
       });
-      return { logged: created?.id, shot, assigneeId: null, unassignedFallback: true };
+      return {
+        logged: created?.id,
+        shot,
+        assigneeId: body.assignees ? assigneeId : null,
+        status: body.status ?? null,
+      };
+    } catch (err) {
+      lastErr = err;
     }
-    throw err;
   }
+  throw lastErr;
 }
 
 /** Register a folder-level taskStatusUpdated webhook -> our endpoint (idempotent). */
