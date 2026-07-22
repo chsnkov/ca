@@ -6,19 +6,18 @@
 // API collapses. Optionally restrict to specific statuses via
 // STATUS_ACTIVITY_STATUSES (comma-separated); empty = all.
 //
-// Layout: ONE shared list ("activity", auto-created inside the report folder)
-// holds every event; each task carries two TAGS — the animator and the status.
-// No assignees at all — assignment requires the member to have access to the
-// list (ITEM_087), and the report folder lives in the owner's private space
-// precisely so animators cannot see it. Tags and lists are API-creatable, so
-// the whole structure can be rebuilt with no manual UI setup.
-//
-// Task name = the shot (parent task name).
+// Layout: ONE shared list ("activity", auto-created inside the report folder —
+// the Roboton folder itself, so the team's sharing applies and members can be
+// natively assigned). Each event task: name = the shot (parent task name),
+// assignee = the animator, due_date = event day, tag = the status.
+// If an assignee lacks access (ITEM_087) the event is still recorded
+// unassigned rather than lost.
 
 const API = 'https://api.clickup.com/api/v2';
 
-// Private "Status Activity" folder in the owner's Personal space.
-const REPORT_FOLDER_ID = () => process.env.STATUS_ACTIVITY_REPORT_FOLDER_ID || '901815475095';
+// Where the "activity" report list lives: the Roboton folder, so animators
+// have access and can be assigned to the event tasks.
+const REPORT_FOLDER_ID = () => process.env.STATUS_ACTIVITY_REPORT_FOLDER_ID || '90189683135';
 const ROBOTON_FOLDER_ID = () => process.env.STATUS_ACTIVITY_FOLDER_ID || '90189683135';
 const ANIMATION_ITEM_ID = () => Number(process.env.STATUS_ACTIVITY_ITEM_ID || '1003');
 
@@ -109,7 +108,7 @@ async function reportListId(): Promise<string> {
  * report task (named after the shot, tagged with the animator and the status)
  * to the shared list in the private report folder.
  */
-export async function logStatusActivity(taskId: string, newStatus: string, _actorId?: number) {
+export async function logStatusActivity(taskId: string, newStatus: string, actorId?: number) {
   const status = String(newStatus || '').trim();
   if (!status) return { ignored: 'no_status' };
   const allow = statusAllowlist();
@@ -132,19 +131,34 @@ export async function logStatusActivity(taskId: string, newStatus: string, _acto
     }
   }
 
-  const who = task?.assignees?.[0];
-  const person = String(who?.username || who?.email || 'unassigned').toLowerCase();
+  const assigneeId = task?.assignees?.[0]?.id ?? actorId;
   const listId = await reportListId();
-  const created = await req(`/list/${listId}/task`, {
-    method: 'POST',
-    body: JSON.stringify({
-      name: shot,
-      due_date: Date.now(),
-      due_date_time: false,
-      tags: [person, status.toLowerCase()],
-    }),
-  });
-  return { logged: created?.id, shot, person, status: status.toLowerCase(), listId };
+  const body: any = {
+    name: shot,
+    due_date: Date.now(),
+    due_date_time: false,
+    tags: [status.toLowerCase()],
+  };
+  if (assigneeId) body.assignees = [Number(assigneeId)];
+
+  try {
+    const created = await req(`/list/${listId}/task`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+    return { logged: created?.id, shot, assigneeId, status: status.toLowerCase() };
+  } catch (err) {
+    // assignee may lack list access (ITEM_087) -> still record it, unassigned
+    if (body.assignees) {
+      delete body.assignees;
+      const created = await req(`/list/${listId}/task`, {
+        method: 'POST',
+        body: JSON.stringify(body),
+      });
+      return { logged: created?.id, shot, assigneeId: null, unassignedFallback: true };
+    }
+    throw err;
+  }
 }
 
 /** Register a folder-level taskStatusUpdated webhook -> our endpoint (idempotent). */
